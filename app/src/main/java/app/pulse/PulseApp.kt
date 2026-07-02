@@ -1,0 +1,30 @@
+package app.pulse
+
+import android.app.Application
+import app.pulse.core.NewPipeDownloader
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import org.schabi.newpipe.extractor.NewPipe
+
+class PulseApp : Application(), ImageLoaderFactory {
+
+    override fun onCreate() {
+        super.onCreate()
+        NewPipe.init(NewPipeDownloader.instance)
+    }
+
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .crossfade(true)
+            .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.25).build() }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("art_cache"))
+                    .maxSizeBytes(96L * 1024 * 1024)
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .build()
+}
