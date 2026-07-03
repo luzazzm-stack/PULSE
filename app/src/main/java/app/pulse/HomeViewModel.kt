@@ -34,15 +34,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun load() {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
-            val shelves = withContext(Dispatchers.IO) {
-                val ytm = runCatching { YtMusic.home() }.getOrDefault(emptyList())
-                if (ytm.isNotEmpty()) ytm
-                else runCatching { Extractor.trending() }.getOrDefault(emptyList())
-                    .let { if (it.isEmpty()) emptyList() else listOf(HomeShelf("Trending", it.map { s -> s.toCard() })) }
-            }
+            // YtMusic.home() already falls back from personalized → anonymous YouTube Music (always music).
+            val shelves = withContext(Dispatchers.IO) { runCatching { YtMusic.home() }.getOrDefault(emptyList()) }
             _state.update { it.copy(loading = false, shelves = shelves, error = if (shelves.isEmpty()) "Couldn't load home" else null) }
         }
     }
 }
-
-private fun StreamItem.toCard() = HomeCard(title, uploader, thumbnailUrl, Uri.parse(url).getQueryParameter("v"), null)

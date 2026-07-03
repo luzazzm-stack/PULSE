@@ -35,7 +35,14 @@ object YtMusic {
     private val JSON = "application/json".toMediaType()
 
     fun home(): List<HomeShelf> {
-        val root = fetch("FEmusic_home")
+        // Try the authed (personalized) YouTube Music home first; if it comes back empty (e.g. the OAuth
+        // token isn't accepted for the music endpoint), fall back to the ANONYMOUS YouTube Music home so
+        // we always show MUSIC — never general YouTube trending/news.
+        val authed = homeShelves(fetch("FEmusic_home", auth = true))
+        return if (authed.isNotEmpty()) authed else homeShelves(fetch("FEmusic_home", auth = false))
+    }
+
+    private fun homeShelves(root: JSONObject): List<HomeShelf> {
         val sections = root
             .o("contents")?.o("singleColumnBrowseResultsRenderer")
             ?.a("tabs")?.obj(0)?.o("tabRenderer")?.o("content")
@@ -81,7 +88,7 @@ object YtMusic {
 
     /** Fetch an album / playlist / artist page: header + all playable tracks found in the response. */
     fun browse(browseId: String): BrowseResult {
-        val root = fetch(browseId)
+        val root = fetch(browseId, auth = false)
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
         val header = listOf(
@@ -141,9 +148,9 @@ object YtMusic {
 
     /** Fetch lyrics for a video, or null if unavailable. */
     fun lyrics(videoId: String): String? {
-        val next = post("next", JSONObject().apply { put("videoId", videoId); put("context", contextClient()) })
+        val next = post("next", JSONObject().apply { put("videoId", videoId); put("context", contextClient()) }, auth = false)
         val browseId = findLyricsBrowseId(next) ?: return null
-        val root = fetch(browseId)
+        val root = fetch(browseId, auth = false)
         val shelf = findFirst(root, "musicDescriptionShelfRenderer") ?: return null
         val runs = shelf.o("description")?.a("runs") ?: return null
         val sb = StringBuilder()
@@ -170,19 +177,24 @@ object YtMusic {
         put("gl", "US")
     })
 
-    private fun fetch(browseId: String): JSONObject =
-        post("browse", JSONObject().apply { put("browseId", browseId); put("context", contextClient()) })
+    private fun fetch(browseId: String, auth: Boolean = true): JSONObject =
+        post("browse", JSONObject().apply { put("browseId", browseId); put("context", contextClient()) }, auth)
 
-    private fun post(endpoint: String, body: JSONObject): JSONObject {
+    private fun post(endpoint: String, body: JSONObject, auth: Boolean = true): JSONObject {
+        val token = if (auth) AuthStore.authHeader() else null
+        // With an OAuth token we sign with Bearer and DROP the browser API key; anonymously we use the key.
+        val url = if (token != null) "https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false"
+        else "https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false"
         val builder = okhttp3.Request.Builder()
-            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false")
+            .url(url)
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
-        // When the user has connected their account, sign with the OAuth Bearer token so YouTube
-        // returns their personalized feed.
-        AuthStore.authHeader()?.let { builder.header("Authorization", it) }
+        if (token != null) {
+            builder.header("Authorization", token)
+            builder.header("X-Goog-Request-Time", (System.currentTimeMillis() / 1000).toString())
+        }
         client.newCall(builder.build()).execute().use { resp ->
             // YouTube returns HTML (not JSON) on rate-limit/captcha/5xx — never let that throw.
             val text = resp.body?.string()?.trimStart() ?: "{}"
