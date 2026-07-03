@@ -56,6 +56,7 @@ fun HomeScreen(
     currentUrl: String?,
     onPlay: (List<StreamItem>, Int) -> Unit,
     onBrowse: (String) -> Unit,
+    onOpenDetail: (String) -> Unit,
     onRetry: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -81,7 +82,7 @@ fun HomeScreen(
                     Text("Retry", color = OnRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Red).clickable { onRetry() }.padding(horizontal = 20.dp, vertical = 8.dp))
                 }
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 150.dp)) {
-                    items(state.shelves, key = { it.title + it.cards.size }) { shelf -> Shelf(shelf, currentUrl, onPlay, onBrowse) }
+                    items(state.shelves, key = { it.title + it.cards.size }) { shelf -> Shelf(shelf, currentUrl, onPlay, onBrowse, onOpenDetail) }
                 }
             }
         }
@@ -89,7 +90,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun Shelf(shelf: HomeShelf, currentUrl: String?, onPlay: (List<StreamItem>, Int) -> Unit, onBrowse: (String) -> Unit) {
+private fun Shelf(shelf: HomeShelf, currentUrl: String?, onPlay: (List<StreamItem>, Int) -> Unit, onBrowse: (String) -> Unit, onOpenDetail: (String) -> Unit) {
     Column(Modifier.padding(top = 14.dp)) {
         Text(shelf.title, color = Tx0, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 10.dp))
         val playables = shelf.cards.filter { it.playable }.map { it.toStreamItem() }
@@ -99,7 +100,7 @@ private fun Shelf(shelf: HomeShelf, currentUrl: String?, onPlay: (List<StreamIte
                     if (card.playable) {
                         val url = card.toStreamItem().url
                         onPlay(playables, playables.indexOfFirst { it.url == url }.coerceAtLeast(0))
-                    } else onBrowse(card.title)
+                    } else if (card.browseId != null) onOpenDetail(card.browseId) else onBrowse(card.title)
                 }
             }
         }

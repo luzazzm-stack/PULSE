@@ -35,10 +35,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.pulse.HomeViewModel
 import app.pulse.SearchViewModel
 import app.pulse.SettingsViewModel
+import app.pulse.core.BrowseResult
 import app.pulse.core.StreamItem
+import app.pulse.core.YtMusic
 import app.pulse.download.DlFormat
 import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
@@ -47,6 +51,7 @@ import app.pulse.playback.PlayerViewModel
 import app.pulse.ui.components.BottomBar
 import app.pulse.ui.components.MiniPlayer
 import app.pulse.ui.components.PulseTab
+import app.pulse.ui.screens.DetailScreen
 import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.LibraryScreen
@@ -72,6 +77,19 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     var nowPlaying by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var detailBrowseId by remember { mutableStateOf<String?>(null) }
+    var detailResult by remember { mutableStateOf<BrowseResult?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(detailBrowseId) {
+        val id = detailBrowseId
+        if (id != null) {
+            detailLoading = true
+            detailResult = null
+            detailResult = withContext(Dispatchers.IO) { runCatching { YtMusic.browse(id) }.getOrNull() }
+            detailLoading = false
+        }
+    }
 
     val play = remember(playerVm) { { list: List<StreamItem>, i: Int -> playerVm.playList(list, i) } }
     val playLocal = remember(playerVm) {
@@ -83,7 +101,8 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     BackHandler(enabled = showPicker) { showPicker = false }
     BackHandler(enabled = !showPicker && showSettings) { showSettings = false }
     BackHandler(enabled = !showPicker && !showSettings && nowPlaying) { nowPlaying = false }
-    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && tab != PulseTab.Home) { tab = PulseTab.Home }
+    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && detailBrowseId != null) { detailBrowseId = null }
+    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && detailBrowseId == null && tab != PulseTab.Home) { tab = PulseTab.Home }
 
     LaunchedEffect(playerUi.error) {
         if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
@@ -92,10 +111,18 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
 
     Box(Modifier.fillMaxSize().background(Bg0)) {
         Box(Modifier.fillMaxSize()) {
-            when (tab) {
+            if (detailBrowseId != null) {
+                DetailScreen(
+                    result = detailResult, loading = detailLoading, currentUrl = curUrl, isPlaying = playerUi.isPlaying,
+                    onBack = { detailBrowseId = null }, onPlay = play,
+                    onShuffle = { playerVm.playList(it.shuffled(), 0) },
+                    onDownloadAll = { list -> list.forEach { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, if (settings.defaultVideo) DlFormat.MP4 else DlFormat.M4A) } },
+                )
+            } else when (tab) {
                 PulseTab.Home -> HomeScreen(
                     homeState, curUrl, play,
                     onBrowse = { q -> searchVm.searchFor(q); tab = PulseTab.Search },
+                    onOpenDetail = { detailBrowseId = it },
                     onRetry = { homeVm.load() },
                     onSettings = { showSettings = true },
                 )

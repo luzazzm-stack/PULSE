@@ -23,6 +23,9 @@ data class HomeCard(
 @Immutable
 data class HomeShelf(val title: String, val cards: List<HomeCard>)
 
+@Immutable
+data class BrowseResult(val title: String, val subtitle: String, val thumbnailUrl: String?, val tracks: List<StreamItem>)
+
 /** Fetches YouTube Music's anonymous home feed via the InnerTube (youtubei) API. Call off the main thread. */
 object YtMusic {
 
@@ -72,6 +75,55 @@ object YtMusic {
             val videoId = r.o("playlistItemData")?.s("videoId")
                 ?: col0?.a("runs")?.obj(0)?.o("navigationEndpoint")?.o("watchEndpoint")?.s("videoId")
             return HomeCard(title, subtitle, r.thumbUrl(), videoId, null)
+        }
+        return null
+    }
+
+    /** Fetch an album / playlist / artist page: header + all playable tracks found in the response. */
+    fun browse(browseId: String): BrowseResult {
+        val root = fetch(browseId)
+        val tracks = ArrayList<StreamItem>()
+        collectTracks(root, tracks)
+        val header = listOf(
+            "musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer",
+            "musicImmersiveHeaderRenderer", "musicEditablePlaylistDetailHeaderRenderer",
+        ).firstNotNullOfOrNull { findFirst(root, it) }
+        val title = header?.o("title")?.a("runs")?.obj(0)?.s("text") ?: "Playlist"
+        val subtitle = header?.o("subtitle")?.a("runs").joinRuns()
+        val thumb = header?.thumbUrl() ?: tracks.firstOrNull()?.thumbnailUrl
+        return BrowseResult(title, subtitle, thumb, tracks.distinctBy { it.url })
+    }
+
+    private fun collectTracks(node: Any?, out: MutableList<StreamItem>) {
+        when (node) {
+            is JSONObject -> {
+                node.optJSONObject("musicResponsiveListItemRenderer")?.let { parseTrack(it)?.let { t -> out.add(t) } }
+                val keys = node.keys()
+                while (keys.hasNext()) collectTracks(node.opt(keys.next()), out)
+            }
+            is JSONArray -> for (i in 0 until node.length()) collectTracks(node.opt(i), out)
+        }
+    }
+
+    private fun parseTrack(r: JSONObject): StreamItem? {
+        val flex = r.a("flexColumns") ?: return null
+        val col0 = flex.obj(0)?.o("musicResponsiveListItemFlexColumnRenderer")?.o("text")
+        val title = col0?.a("runs")?.obj(0)?.s("text") ?: return null
+        val artist = flex.obj(1)?.o("musicResponsiveListItemFlexColumnRenderer")?.o("text")?.a("runs").joinRuns()
+        val videoId = r.o("playlistItemData")?.s("videoId")
+            ?: col0?.a("runs")?.obj(0)?.o("navigationEndpoint")?.o("watchEndpoint")?.s("videoId")
+            ?: return null
+        return StreamItem("https://www.youtube.com/watch?v=$videoId", title, artist, 0, r.thumbUrl())
+    }
+
+    private fun findFirst(node: Any?, key: String): JSONObject? {
+        when (node) {
+            is JSONObject -> {
+                node.optJSONObject(key)?.let { return it }
+                val keys = node.keys()
+                while (keys.hasNext()) findFirst(node.opt(keys.next()), key)?.let { return it }
+            }
+            is JSONArray -> for (i in 0 until node.length()) findFirst(node.opt(i), key)?.let { return it }
         }
         return null
     }
