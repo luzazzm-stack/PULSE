@@ -70,15 +70,15 @@ fun Thumb(url: String?, modifier: Modifier = Modifier, corner: Dp = 8.dp) {
 
 @Composable
 fun PlayingBars(modifier: Modifier = Modifier, playing: Boolean = true, color: Color = Red) {
-    val heights: List<Float> = if (playing) {
-        val t = rememberInfiniteTransition(label = "eq")
-        val h1 by t.animateFloat(0.35f, 1f, infiniteRepeatable(tween(340), RepeatMode.Reverse), label = "b1")
-        val h2 by t.animateFloat(0.35f, 1f, infiniteRepeatable(tween(220), RepeatMode.Reverse), label = "b2")
-        val h3 by t.animateFloat(0.35f, 1f, infiniteRepeatable(tween(460), RepeatMode.Reverse), label = "b3")
-        listOf(h1, h2, h3)
-    } else listOf(0.4f, 0.4f, 0.4f)
+    // NOTE: the composable animation calls MUST run unconditionally on every recomposition.
+    // Calling them inside only one branch of an `if (playing)` changes the group count when
+    // `playing` flips (pause/resume) and corrupts Compose's slot table (Stack.pop crash).
+    val t = rememberInfiniteTransition(label = "eq")
+    val h1 by t.animateFloat(0.35f, if (playing) 1f else 0.4f, infiniteRepeatable(tween(340), RepeatMode.Reverse), label = "b1")
+    val h2 by t.animateFloat(0.35f, if (playing) 1f else 0.4f, infiniteRepeatable(tween(220), RepeatMode.Reverse), label = "b2")
+    val h3 by t.animateFloat(0.35f, if (playing) 1f else 0.4f, infiniteRepeatable(tween(460), RepeatMode.Reverse), label = "b3")
     Row(modifier.height(16.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        heights.forEach { hv ->
+        listOf(h1, h2, h3).forEach { hv ->
             Box(Modifier.width(3.dp).fillMaxHeight(hv).clip(RoundedCornerShape(2.dp)).background(color))
         }
     }
