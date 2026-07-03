@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 23
-        versionName = "0.9.5"
+        versionCode = 24
+        versionName = "0.9.6"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -97,6 +97,9 @@ dependencies {
     // Ad-free YouTube engine (NewPipe extractor) + HTTP
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Updates the device TLS/security provider on old phones (e.g. Galaxy J7) so HTTPS to YouTube works
+    implementation("com.google.android.gms:play-services-base:18.5.0")
 
     // Java 8+ APIs (java.time etc. used by NewPipeExtractor) on Android 5+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")

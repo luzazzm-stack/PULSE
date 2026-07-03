@@ -129,7 +129,7 @@ fun SearchScreen(
                     Box(Modifier.fillMaxSize()) {
                         when {
                             state.loading -> CircularProgressIndicator(color = Red, modifier = Modifier.align(Alignment.TopCenter).padding(top = 40.dp))
-                            state.error != null -> Hint("Couldn't search — check your connection.")
+                            state.error != null -> Hint("Couldn't search.\n${state.error}")
                             state.results.isEmpty() -> Hint("No results for \"${state.query}\".")
                             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 150.dp)) {
                                 item { TopResult(state.results[0], state.results[0].url == currentUrl, isPlaying) { onPlay(state.results, 0) } }

@@ -12,12 +12,16 @@ import kotlinx.coroutines.runBlocking
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.google.android.gms.security.ProviderInstaller
 import org.schabi.newpipe.extractor.NewPipe
 
 class PulseApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Old phones (e.g. Galaxy J7 on Android 6-8) ship an outdated TLS/security provider whose cipher
+        // suites Google's servers reject — updating it fixes HTTPS to YouTube (search, home, streaming).
+        runCatching { ProviderInstaller.installIfNeeded(this) }
         NewPipe.init(NewPipeDownloader.instance)
         DownloadManager.init(this)
         PlaylistStore.init(this)
@@ -28,11 +32,11 @@ class PulseApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
             .crossfade(true)
-            .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.25).build() }
+            .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.15).build() }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("art_cache"))
-                    .maxSizeBytes(96L * 1024 * 1024)
+                    .maxSizeBytes(48L * 1024 * 1024)
                     .build()
             }
             .respectCacheHeaders(false)

@@ -48,7 +48,10 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch {
             val res = withContext(Dispatchers.IO) { runCatching { Extractor.searchMusic(q, videos) } }
             res.onSuccess { list -> _state.update { it.copy(loading = false, results = list) } }
-                .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Search failed", results = emptyList()) } }
+                .onFailure { e ->
+                    android.util.Log.e("Emma/Search", "search failed", e)
+                    _state.update { it.copy(loading = false, error = e.message ?: e.javaClass.simpleName, results = emptyList()) }
+                }
         }
     }
 
