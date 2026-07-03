@@ -13,8 +13,9 @@ object Extractor {
 
     private val yt = ServiceList.YouTube
 
-    fun searchMusic(query: String): List<StreamItem> {
-        val handler = yt.searchQHFactory.fromQuery(query, listOf("music_songs"), "")
+    fun searchMusic(query: String, videos: Boolean = false): List<StreamItem> {
+        val filter = if (videos) "music_videos" else "music_songs"
+        val handler = yt.searchQHFactory.fromQuery(query, listOf(filter), "")
         val info = SearchInfo.getInfo(yt, handler)
         return info.relatedItems.filterIsInstance<StreamInfoItem>().map { it.toItem() }
     }

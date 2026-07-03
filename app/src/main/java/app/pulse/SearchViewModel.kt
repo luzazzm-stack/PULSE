@@ -22,6 +22,7 @@ data class SearchState(
     val searched: Boolean = false,
     val error: String? = null,
     val recents: List<String> = emptyList(),
+    val tab: Int = 0,
 )
 
 class SearchViewModel(app: Application) : AndroidViewModel(app) {
@@ -42,12 +43,20 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         if (q.isEmpty()) return
         addRecent(q)
         job?.cancel()
+        val videos = _state.value.tab == 2
         _state.update { it.copy(loading = true, error = null, searched = true) }
         job = viewModelScope.launch {
-            val res = withContext(Dispatchers.IO) { runCatching { Extractor.searchMusic(q) } }
+            val res = withContext(Dispatchers.IO) { runCatching { Extractor.searchMusic(q, videos) } }
             res.onSuccess { list -> _state.update { it.copy(loading = false, results = list) } }
                 .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Search failed", results = emptyList()) } }
         }
+    }
+
+    /** Switch the results tab (Top/Songs/Videos/Albums/Artists) and re-run the search. */
+    fun setTab(i: Int) {
+        if (_state.value.tab == i) return
+        _state.update { it.copy(tab = i) }
+        if (_state.value.searched && _state.value.query.isNotBlank()) search()
     }
 
     /** Return to the idle screen (recents + browse) from results. */

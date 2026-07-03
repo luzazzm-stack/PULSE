@@ -211,6 +211,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onQuery = searchVm::setQuery, onSearch = searchVm::search,
                     onSearchFor = { q -> searchVm.searchFor(q) }, onClearRecents = searchVm::clearRecents,
                     onClearQuery = searchVm::clearQuery, onPlay = play,
+                    onTab = searchVm::setTab,
+                    onDownload = { t -> DownloadManager.enqueue(context, t.url, t.title, t.uploader, t.thumbnailUrl, if (settings.defaultVideo) DlFormat.MP4 else DlFormat.M4A); Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show() },
+                    onMore = { t -> overflowTrack = t; showOverflow = true },
                 )
                 PulseTab.Library -> LibraryScreen(
                     downloads, playlists, onPlay = playLocal,
