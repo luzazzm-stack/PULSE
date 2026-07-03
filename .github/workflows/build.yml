@@ -39,5 +39,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: PULSE-debug-apk
-          path: app/build/outputs/apk/debug/PULSE-*.apk
+          path: app/build/outputs/apk/debug/Emma-*.apk
           if-no-files-found: error
