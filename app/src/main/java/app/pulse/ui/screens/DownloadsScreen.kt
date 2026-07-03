@@ -68,24 +68,23 @@ fun DownloadsScreen(
 
         if (items.isEmpty()) {
             EmptyDownloads(onBrowse)
-            return@Column
-        }
+        } else {
+            // storage strip
+            Row(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bg1).border(1.dp, Line08, RoundedCornerShape(12.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Download, null, tint = Tx1, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("${completed.size} downloaded · ${downloading.size + queued.size} in queue", color = Tx0, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
 
-        // storage strip
-        Row(
-            Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bg1).border(1.dp, Line08, RoundedCornerShape(12.dp)).padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.Download, null, tint = Tx1, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(10.dp))
-            Text("${completed.size} downloaded · ${downloading.size + queued.size} in queue", color = Tx0, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
-
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 150.dp)) {
-            section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, onPlay, onRemove, onRetry) }
-            section("QUEUED (${queued.size})", queued) { DlRow(it, onPlay, onRemove, onRetry) }
-            section("COMPLETED (${completed.size})", completed) { DlRow(it, onPlay, onRemove, onRetry) }
-            section("FAILED (${failed.size})", failed) { DlRow(it, onPlay, onRemove, onRetry) }
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 150.dp)) {
+                section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, onPlay, onRemove, onRetry) }
+                section("QUEUED (${queued.size})", queued) { DlRow(it, onPlay, onRemove, onRetry) }
+                section("COMPLETED (${completed.size})", completed) { DlRow(it, onPlay, onRemove, onRetry) }
+                section("FAILED (${failed.size})", failed) { DlRow(it, onPlay, onRemove, onRetry) }
+            }
         }
     }
 }
