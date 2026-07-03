@@ -15,9 +15,10 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             PulseTheme {
+                val homeVm: HomeViewModel = viewModel()
                 val searchVm: SearchViewModel = viewModel()
                 val playerVm: PlayerViewModel = viewModel()
-                PulseRoot(searchVm, playerVm)
+                PulseRoot(homeVm, searchVm, playerVm)
             }
         }
     }

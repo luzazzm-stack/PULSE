@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.concurrent.Future
 
 @Immutable
@@ -83,6 +84,24 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun playOne(item: StreamItem) = playList(listOf(item), 0)
+
+    /** Play a locally-downloaded file directly (no extractor resolution). */
+    fun playLocalFile(title: String, uploader: String, thumbnailUrl: String?, filePath: String) {
+        val c = controller ?: return
+        val item = StreamItem(url = filePath, title = title, uploader = uploader, durationSec = 0, thumbnailUrl = thumbnailUrl)
+        items = listOf(item)
+        index = 0
+        _ui.update { it.copy(items = items, index = 0, hasCurrent = true, loading = false, error = null) }
+        val mi = MediaItem.Builder()
+            .setUri(Uri.fromFile(File(filePath)))
+            .setMediaMetadata(
+                MediaMetadata.Builder().setTitle(title).setArtist(uploader).setArtworkUri(thumbnailUrl?.let { Uri.parse(it) }).build()
+            )
+            .build()
+        c.setMediaItem(mi)
+        c.prepare()
+        c.play()
+    }
 
     fun next() { if (index < items.lastIndex) { index++; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
     fun prev() { if (index > 0) { index--; _ui.update { it.copy(index = index) }; resolveAndPlay() } }

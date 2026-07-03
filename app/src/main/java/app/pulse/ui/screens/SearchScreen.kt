@@ -1,6 +1,7 @@
 package app.pulse.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,8 +75,9 @@ fun SearchScreen(
                 )
             }
             if (state.query.isNotEmpty()) {
-                Icon(Icons.Rounded.Close, "clear", tint = Tx2, modifier = Modifier.size(18.dp)
-                    .padding(start = 4.dp))
+                Box(Modifier.size(36.dp).clickable { onQuery("") }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Close, "clear", tint = Tx2, modifier = Modifier.size(18.dp))
+                }
             }
         }
 

@@ -2,6 +2,7 @@ package app.pulse
 
 import android.app.Application
 import app.pulse.core.NewPipeDownloader
+import app.pulse.download.DownloadManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -13,6 +14,7 @@ class PulseApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(NewPipeDownloader.instance)
+        DownloadManager.init(this)
     }
 
     override fun newImageLoader(): ImageLoader =

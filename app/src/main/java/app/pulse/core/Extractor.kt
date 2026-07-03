@@ -2,12 +2,13 @@ package app.pulse.core
 
 import org.schabi.newpipe.extractor.Image
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.kiosk.KioskInfo
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
-/** Thin wrapper over NewPipeExtractor's YouTube service — search + stream resolution. Call off the main thread. */
+/** Thin wrapper over NewPipeExtractor's YouTube service — search + trending + stream resolution. Call off the main thread. */
 object Extractor {
 
     private val yt = ServiceList.YouTube
@@ -15,17 +16,15 @@ object Extractor {
     fun searchMusic(query: String): List<StreamItem> {
         val handler = yt.searchQHFactory.fromQuery(query, listOf("music_songs"), "")
         val info = SearchInfo.getInfo(yt, handler)
-        return info.relatedItems
-            .filterIsInstance<StreamInfoItem>()
-            .map {
-                StreamItem(
-                    url = it.url,
-                    title = it.name,
-                    uploader = it.uploaderName ?: "",
-                    durationSec = it.duration,
-                    thumbnailUrl = it.thumbnails.bestUrl(),
-                )
-            }
+        return info.relatedItems.filterIsInstance<StreamInfoItem>().map { it.toItem() }
+    }
+
+    fun trending(): List<StreamItem> {
+        val kl = yt.kioskList
+        val id = kl.defaultKioskId
+        val handler = kl.getListLinkHandlerFactoryByType(id).fromId(id)
+        val info = KioskInfo.getInfo(yt, handler.url)
+        return info.relatedItems.filterIsInstance<StreamInfoItem>().map { it.toItem() }
     }
 
     fun streamInfo(url: String): StreamData {
@@ -48,6 +47,14 @@ object Extractor {
             videoUrl = videoUrl,
         )
     }
+
+    private fun StreamInfoItem.toItem() = StreamItem(
+        url = url,
+        title = name,
+        uploader = uploaderName ?: "",
+        durationSec = duration,
+        thumbnailUrl = thumbnails.bestUrl(),
+    )
 
     private fun List<Image>.bestUrl(): String? = maxByOrNull { it.height }?.url
 
