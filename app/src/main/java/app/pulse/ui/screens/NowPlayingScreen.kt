@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.QueueMusic
@@ -81,6 +83,9 @@ fun NowPlayingScreen(
     onMore: () -> Unit,
     player: Player?,
     onToggleVideo: () -> Unit,
+    source: String,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
 ) {
     val item = ui.current
     if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
@@ -104,9 +109,12 @@ fun NowPlayingScreen(
                 Box(Modifier.size(44.dp).clickable { onClose() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.KeyboardArrowDown, "close", tint = Tx0, modifier = Modifier.size(30.dp))
                 }
-                Text("NOW PLAYING", color = Tx2, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                Box(Modifier.size(44.dp).clickable { onDownload() }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Download, "download", tint = Tx0, modifier = Modifier.size(24.dp))
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("PLAYING FROM", color = Tx2, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
+                    Text(source, color = Tx0, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Box(Modifier.size(44.dp).clickable { onMore() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.MoreHoriz, "more", tint = Tx0, modifier = Modifier.size(24.dp))
                 }
             }
 
@@ -127,9 +135,14 @@ fun NowPlayingScreen(
             }
             Spacer(Modifier.weight(1f))
 
-            Column(Modifier.fillMaxWidth()) {
-                Text(item.title, color = Tx0, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(item.uploader, color = Tx1, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(item.title, color = Tx0, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.uploader, color = Tx1, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Box(Modifier.size(44.dp).clickable { onToggleLike() }, contentAlignment = Alignment.Center) {
+                    Icon(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "like", tint = if (liked) Red else Tx1, modifier = Modifier.size(26.dp))
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -162,11 +175,11 @@ fun NowPlayingScreen(
                 Box(Modifier.size(48.dp).clickable { onLyrics() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.Article, "lyrics", tint = Tx1, modifier = Modifier.size(22.dp))
                 }
+                Box(Modifier.size(48.dp).clickable { onDownload() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Download, "download", tint = Tx1, modifier = Modifier.size(22.dp))
+                }
                 Box(Modifier.size(48.dp).clickable { onQueue() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.QueueMusic, "queue", tint = Tx1, modifier = Modifier.size(22.dp))
-                }
-                Box(Modifier.size(48.dp).clickable { onMore() }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.MoreHoriz, "more", tint = Tx1, modifier = Modifier.size(22.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))

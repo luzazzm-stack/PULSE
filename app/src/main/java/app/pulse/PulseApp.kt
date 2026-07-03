@@ -2,6 +2,7 @@ package app.pulse
 
 import android.app.Application
 import app.pulse.core.AuthStore
+import app.pulse.core.FavoritesStore
 import app.pulse.core.NewPipeDownloader
 import app.pulse.core.OnboardingStore
 import app.pulse.core.PlaylistStore
@@ -20,6 +21,7 @@ class PulseApp : Application(), ImageLoaderFactory {
         NewPipe.init(NewPipeDownloader.instance)
         DownloadManager.init(this)
         PlaylistStore.init(this)
+        FavoritesStore.init(this)
         runBlocking { AuthStore.load(this@PulseApp); OnboardingStore.load(this@PulseApp) }
     }
 

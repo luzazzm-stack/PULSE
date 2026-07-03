@@ -37,6 +37,7 @@ data class PlayerUi(
     val hasCurrent: Boolean = false,
     val error: String? = null,
     val videoMode: Boolean = false,
+    val source: String = "PULSE",
 ) {
     val current: StreamItem? get() = items.getOrNull(index)
 }
@@ -77,11 +78,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun playList(list: List<StreamItem>, startIndex: Int) {
+    fun playList(list: List<StreamItem>, startIndex: Int, source: String = "PULSE") {
         if (list.isEmpty()) return
         items = list
         index = startIndex.coerceIn(0, list.lastIndex)
-        _ui.update { it.copy(items = list, index = index, hasCurrent = true) }
+        _ui.update { it.copy(items = list, index = index, hasCurrent = true, source = source) }
         resolveAndPlay()
     }
 

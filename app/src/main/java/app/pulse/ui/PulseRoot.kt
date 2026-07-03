@@ -45,6 +45,7 @@ import app.pulse.SearchViewModel
 import app.pulse.SettingsViewModel
 import app.pulse.core.AuthStore
 import app.pulse.core.BrowseResult
+import app.pulse.core.FavoritesStore
 import app.pulse.core.PlaylistStore
 import app.pulse.core.StreamItem
 import app.pulse.core.YtMusic
@@ -84,6 +85,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val settings by settingsVm.state.collectAsStateWithLifecycle()
     val connected by AuthStore.connectedFlow.collectAsStateWithLifecycle()
     val playlists by PlaylistStore.playlists.collectAsStateWithLifecycle()
+    val likedSet by FavoritesStore.liked.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -159,8 +161,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
             if (detailBrowseId != null) {
                 DetailScreen(
                     result = detailResult, loading = detailLoading, currentUrl = curUrl, isPlaying = playerUi.isPlaying,
-                    onBack = { detailBrowseId = null }, onPlay = play,
-                    onShuffle = { playerVm.playList(it.shuffled(), 0) },
+                    onBack = { detailBrowseId = null },
+                    onPlay = { list, i -> playerVm.playList(list, i, detailResult?.title ?: "PULSE") },
+                    onShuffle = { playerVm.playList(it.shuffled(), 0, detailResult?.title ?: "PULSE") },
                     onDownloadAll = { list -> list.forEach { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, if (settings.defaultVideo) DlFormat.MP4 else DlFormat.M4A) } },
                 )
             } else when (tab) {
@@ -212,6 +215,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 onMore = { overflowTrack = playerUi.current; showOverflow = true },
                 player = playerVm.exoPlayer(),
                 onToggleVideo = { playerVm.toggleVideoMode() },
+                source = playerUi.source,
+                liked = curUrl != null && curUrl in likedSet,
+                onToggleLike = { curUrl?.let { FavoritesStore.toggle(it) } },
             )
         }
 
