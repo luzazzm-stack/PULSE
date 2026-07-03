@@ -28,14 +28,16 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 var onboarded by remember { mutableStateOf(OnboardingStore.done) }
 
+                // The main app is always mounted (ViewModels created once); onboarding is an opaque
+                // overlay on top, so dismissing it never tears down / rebuilds the app tree mid-frame.
+                val homeVm: HomeViewModel = viewModel()
+                val searchVm: SearchViewModel = viewModel()
+                val playerVm: PlayerViewModel = viewModel()
+                val settingsVm: SettingsViewModel = viewModel()
+                PulseRoot(homeVm, searchVm, playerVm, settingsVm)
+
                 if (!onboarded) {
                     OnboardingScreen(onDone = { scope.launch { OnboardingStore.setDone(context) }; onboarded = true })
-                } else {
-                    val homeVm: HomeViewModel = viewModel()
-                    val searchVm: SearchViewModel = viewModel()
-                    val playerVm: PlayerViewModel = viewModel()
-                    val settingsVm: SettingsViewModel = viewModel()
-                    PulseRoot(homeVm, searchVm, playerVm, settingsVm)
                 }
             }
         }
