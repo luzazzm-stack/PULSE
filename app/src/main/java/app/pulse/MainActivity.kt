@@ -18,7 +18,8 @@ class MainActivity : ComponentActivity() {
                 val homeVm: HomeViewModel = viewModel()
                 val searchVm: SearchViewModel = viewModel()
                 val playerVm: PlayerViewModel = viewModel()
-                PulseRoot(homeVm, searchVm, playerVm)
+                val settingsVm: SettingsViewModel = viewModel()
+                PulseRoot(homeVm, searchVm, playerVm, settingsVm)
             }
         }
     }

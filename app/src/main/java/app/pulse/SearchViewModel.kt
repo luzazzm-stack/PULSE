@@ -21,6 +21,7 @@ data class SearchState(
     val results: List<StreamItem> = emptyList(),
     val searched: Boolean = false,
     val error: String? = null,
+    val recents: List<String> = emptyList(),
 )
 
 class SearchViewModel(app: Application) : AndroidViewModel(app) {
@@ -31,9 +32,15 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setQuery(q: String) { _state.update { it.copy(query = q) } }
 
+    fun searchFor(q: String) {
+        _state.update { it.copy(query = q) }
+        search()
+    }
+
     fun search() {
         val q = _state.value.query.trim()
         if (q.isEmpty()) return
+        addRecent(q)
         job?.cancel()
         _state.update { it.copy(loading = true, error = null, searched = true) }
         job = viewModelScope.launch {
@@ -41,5 +48,14 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             res.onSuccess { list -> _state.update { it.copy(loading = false, results = list) } }
                 .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Search failed", results = emptyList()) } }
         }
+    }
+
+    /** Return to the idle screen (recents + browse) from results. */
+    fun clearQuery() { job?.cancel(); _state.update { it.copy(query = "", results = emptyList(), searched = false, loading = false, error = null) } }
+
+    fun clearRecents() { _state.update { it.copy(recents = emptyList()) } }
+
+    private fun addRecent(q: String) {
+        _state.update { it.copy(recents = (listOf(q) + it.recents.filterNot { r -> r.equals(q, true) }).take(8)) }
     }
 }

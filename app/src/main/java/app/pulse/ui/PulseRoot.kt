@@ -37,8 +37,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.pulse.HomeViewModel
 import app.pulse.SearchViewModel
+import app.pulse.SettingsViewModel
 import app.pulse.core.StreamItem
 import app.pulse.download.DlFormat
+import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
 import app.pulse.download.DownloadManager
 import app.pulse.playback.PlayerViewModel
@@ -49,6 +51,7 @@ import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.NowPlayingScreen
 import app.pulse.ui.screens.SearchScreen
+import app.pulse.ui.screens.SettingsScreen
 import app.pulse.ui.theme.Bg0
 import app.pulse.ui.theme.Bg2
 import app.pulse.ui.theme.Red
@@ -56,16 +59,18 @@ import app.pulse.ui.theme.Tx0
 import app.pulse.ui.theme.Tx2
 
 @Composable
-fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: PlayerViewModel) {
+fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: PlayerViewModel, settingsVm: SettingsViewModel) {
     val homeState by homeVm.state.collectAsStateWithLifecycle()
     val searchState by searchVm.state.collectAsStateWithLifecycle()
     val playerUi by playerVm.ui.collectAsStateWithLifecycle()
     val downloads by DownloadManager.items.collectAsStateWithLifecycle()
+    val settings by settingsVm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var tab by remember { mutableStateOf(PulseTab.Home) }
     var nowPlaying by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     val play = remember(playerVm) { { list: List<StreamItem>, i: Int -> playerVm.playList(list, i) } }
     val playLocal = remember(playerVm) {
@@ -75,8 +80,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
 
     // Back navigation — exactly one is enabled at a time
     BackHandler(enabled = showPicker) { showPicker = false }
-    BackHandler(enabled = !showPicker && nowPlaying) { nowPlaying = false }
-    BackHandler(enabled = !showPicker && !nowPlaying && tab != PulseTab.Home) { tab = PulseTab.Home }
+    BackHandler(enabled = !showPicker && showSettings) { showSettings = false }
+    BackHandler(enabled = !showPicker && !showSettings && nowPlaying) { nowPlaying = false }
+    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && tab != PulseTab.Home) { tab = PulseTab.Home }
 
     LaunchedEffect(playerUi.error) {
         if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
@@ -88,10 +94,16 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
             when (tab) {
                 PulseTab.Home -> HomeScreen(
                     homeState, curUrl, play,
-                    onBrowse = { q -> searchVm.setQuery(q); searchVm.search(); tab = PulseTab.Search },
+                    onBrowse = { q -> searchVm.searchFor(q); tab = PulseTab.Search },
                     onRetry = { homeVm.load() },
+                    onSettings = { showSettings = true },
                 )
-                PulseTab.Search -> SearchScreen(searchState, curUrl, playerUi.isPlaying, searchVm::setQuery, searchVm::search, play)
+                PulseTab.Search -> SearchScreen(
+                    searchState, curUrl, playerUi.isPlaying,
+                    onQuery = searchVm::setQuery, onSearch = searchVm::search,
+                    onSearchFor = { q -> searchVm.searchFor(q) }, onClearRecents = searchVm::clearRecents,
+                    onClearQuery = searchVm::clearQuery, onPlay = play,
+                )
                 PulseTab.Library -> DownloadsScreen("Library", downloads, onlyCompleted = true, onPlay = playLocal, onRemove = removeDl)
                 PulseTab.Downloads -> DownloadsScreen("Downloads", downloads, onlyCompleted = false, onPlay = playLocal, onRemove = removeDl)
             }
@@ -114,6 +126,20 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 onSeek = { playerVm.seekTo(it) },
                 onDownload = { showPicker = true },
             )
+        }
+
+        if (showSettings) {
+            Box(Modifier.fillMaxSize().background(Bg0)) {
+                SettingsScreen(
+                    s = settings,
+                    completedDownloads = downloads.count { it.status == DlStatus.Completed },
+                    onBack = { showSettings = false },
+                    onSetVideo = { settingsVm.setVideo(it) },
+                    onSetWifi = { settingsVm.setWifiOnly(it) },
+                    onSetPreferVideo = { settingsVm.setPreferVideo(it) },
+                    onSetMax = { settingsVm.setMaxConcurrent(it) },
+                )
+            }
         }
 
         if (showPicker) {

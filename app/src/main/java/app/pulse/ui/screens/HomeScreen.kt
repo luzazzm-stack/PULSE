@@ -21,7 +21,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -51,12 +54,17 @@ fun HomeScreen(
     onPlay: (List<StreamItem>, Int) -> Unit,
     onBrowse: (String) -> Unit,
     onRetry: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("PULSE", color = Tx0, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
             Spacer(Modifier.width(5.dp))
-            Box(Modifier.padding(bottom = 4.dp).size(6.dp).clip(CircleShape).background(Red))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(Red))
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(44.dp).clickable { onSettings() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Settings, "settings", tint = Tx1, modifier = Modifier.size(24.dp))
+            }
         }
 
         Box(Modifier.fillMaxSize()) {
