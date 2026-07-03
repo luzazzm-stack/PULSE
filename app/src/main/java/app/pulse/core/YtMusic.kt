@@ -138,14 +138,19 @@ object YtMusic {
                 put("gl", "US")
             }))
         }
-        val req = okhttp3.Request.Builder()
+        val builder = okhttp3.Request.Builder()
             .url("https://music.youtube.com/youtubei/v1/browse?key=$KEY&prettyPrint=false")
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
-            .build()
-        client.newCall(req).execute().use { resp ->
+        // When the user has connected their session, sign the request so YouTube returns their personalized feed.
+        AuthStore.cookies?.let { c ->
+            builder.header("Cookie", c)
+            AuthStore.sapisidHash()?.let { builder.header("Authorization", it) }
+            builder.header("X-Goog-AuthUser", "0")
+        }
+        client.newCall(builder.build()).execute().use { resp ->
             return JSONObject(resp.body?.string() ?: "{}")
         }
     }

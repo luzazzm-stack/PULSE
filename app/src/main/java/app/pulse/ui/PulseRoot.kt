@@ -25,7 +25,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,7 @@ import kotlinx.coroutines.withContext
 import app.pulse.HomeViewModel
 import app.pulse.SearchViewModel
 import app.pulse.SettingsViewModel
+import app.pulse.core.AuthStore
 import app.pulse.core.BrowseResult
 import app.pulse.core.StreamItem
 import app.pulse.core.YtMusic
@@ -55,6 +58,7 @@ import app.pulse.ui.screens.DetailScreen
 import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.LibraryScreen
+import app.pulse.ui.screens.LoginScreen
 import app.pulse.ui.screens.NowPlayingScreen
 import app.pulse.ui.screens.SearchScreen
 import app.pulse.ui.screens.SettingsScreen
@@ -71,12 +75,15 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val playerUi by playerVm.ui.collectAsStateWithLifecycle()
     val downloads by DownloadManager.items.collectAsStateWithLifecycle()
     val settings by settingsVm.state.collectAsStateWithLifecycle()
+    val connected by AuthStore.connectedFlow.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(PulseTab.Home) }
     var nowPlaying by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showLogin by remember { mutableStateOf(false) }
     var detailBrowseId by remember { mutableStateOf<String?>(null) }
     var detailResult by remember { mutableStateOf<BrowseResult?>(null) }
     var detailLoading by remember { mutableStateOf(false) }
@@ -98,11 +105,12 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val removeDl = remember { { dl: DownloadItem -> DownloadManager.remove(dl) } }
 
     // Back navigation — exactly one is enabled at a time
-    BackHandler(enabled = showPicker) { showPicker = false }
-    BackHandler(enabled = !showPicker && showSettings) { showSettings = false }
-    BackHandler(enabled = !showPicker && !showSettings && nowPlaying) { nowPlaying = false }
-    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && detailBrowseId != null) { detailBrowseId = null }
-    BackHandler(enabled = !showPicker && !showSettings && !nowPlaying && detailBrowseId == null && tab != PulseTab.Home) { tab = PulseTab.Home }
+    BackHandler(enabled = showLogin) { showLogin = false }
+    BackHandler(enabled = !showLogin && showPicker) { showPicker = false }
+    BackHandler(enabled = !showLogin && !showPicker && showSettings) { showSettings = false }
+    BackHandler(enabled = !showLogin && !showPicker && !showSettings && nowPlaying) { nowPlaying = false }
+    BackHandler(enabled = !showLogin && !showPicker && !showSettings && !nowPlaying && detailBrowseId != null) { detailBrowseId = null }
+    BackHandler(enabled = !showLogin && !showPicker && !showSettings && !nowPlaying && detailBrowseId == null && tab != PulseTab.Home) { tab = PulseTab.Home }
 
     LaunchedEffect(playerUi.error) {
         if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
@@ -165,6 +173,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 SettingsScreen(
                     s = settings,
                     completedDownloads = downloads.count { it.status == DlStatus.Completed },
+                    connected = connected,
+                    onConnect = { showLogin = true },
+                    onDisconnect = { scope.launch { AuthStore.clear(context); homeVm.load() } },
                     onBack = { showSettings = false },
                     onSetVideo = { settingsVm.setVideo(it) },
                     onSetWifi = { settingsVm.setWifiOnly(it) },
@@ -183,6 +194,15 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     Toast.makeText(context, "Download started — see the Downloads tab", Toast.LENGTH_SHORT).show()
                 },
             )
+        }
+
+        if (showLogin) {
+            Box(Modifier.fillMaxSize().background(Bg0)) {
+                LoginScreen(
+                    onConnected = { cookies -> scope.launch { AuthStore.save(context, cookies); homeVm.load() }; showLogin = false },
+                    onCancel = { showLogin = false },
+                )
+            }
         }
     }
 }

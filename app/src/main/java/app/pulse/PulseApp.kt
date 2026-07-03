@@ -1,9 +1,11 @@
 package app.pulse
 
 import android.app.Application
+import app.pulse.core.AuthStore
 import app.pulse.core.NewPipeDownloader
 import app.pulse.download.DownloadManager
 import coil.ImageLoader
+import kotlinx.coroutines.runBlocking
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
@@ -15,6 +17,7 @@ class PulseApp : Application(), ImageLoaderFactory {
         super.onCreate()
         NewPipe.init(NewPipeDownloader.instance)
         DownloadManager.init(this)
+        runBlocking { AuthStore.load(this@PulseApp) }
     }
 
     override fun newImageLoader(): ImageLoader =

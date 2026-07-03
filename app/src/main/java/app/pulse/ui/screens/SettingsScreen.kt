@@ -48,6 +48,9 @@ import app.pulse.ui.theme.Tx3
 fun SettingsScreen(
     s: AppSettings,
     completedDownloads: Int,
+    connected: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
     onBack: () -> Unit,
     onSetVideo: (Boolean) -> Unit,
     onSetWifi: (Boolean) -> Unit,
@@ -64,6 +67,27 @@ fun SettingsScreen(
         }
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 40.dp)) {
+            Section("ACCOUNT")
+            Card {
+                if (connected) {
+                    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Connected", color = Tx0, fontSize = 15.sp)
+                            Text("Your YouTube Music account", color = Tx2, fontSize = 12.sp)
+                        }
+                        Text("Disconnect", color = Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onDisconnect() })
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth().height(60.dp).clickable { onConnect() }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Connect session with browser", color = Tx0, fontSize = 15.sp)
+                            Text("Sign in to load your personalized home", color = Tx2, fontSize = 12.sp)
+                        }
+                        Icon(Icons.Rounded.ChevronRight, null, tint = Tx3, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
             Section("DOWNLOADS")
             Card {
                 ValueRow("Default format", if (s.defaultVideo) "Video (MP4)" else "Audio (M4A)") { onSetVideo(!s.defaultVideo) }
@@ -128,7 +152,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(5.dp))
                         Box(Modifier.padding(bottom = 4.dp).size(5.dp).clip(CircleShape).background(Red))
                     }
-                    Text("Version 0.2.3", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Version 0.4.0", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("A native, ad-free player", color = Tx3, fontSize = 12.sp)
                 }
             }
