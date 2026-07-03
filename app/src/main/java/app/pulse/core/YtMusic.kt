@@ -180,12 +180,9 @@ object YtMusic {
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
-        // When the user has connected their session, sign the request so YouTube returns their personalized feed.
-        AuthStore.cookies?.let { c ->
-            builder.header("Cookie", c)
-            AuthStore.sapisidHash()?.let { builder.header("Authorization", it) }
-            builder.header("X-Goog-AuthUser", "0")
-        }
+        // When the user has connected their account, sign with the OAuth Bearer token so YouTube
+        // returns their personalized feed.
+        AuthStore.authHeader()?.let { builder.header("Authorization", it) }
         client.newCall(builder.build()).execute().use { resp ->
             // YouTube returns HTML (not JSON) on rate-limit/captcha/5xx — never let that throw.
             val text = resp.body?.string()?.trimStart() ?: "{}"

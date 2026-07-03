@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import app.pulse.HomeViewModel
 import app.pulse.SearchViewModel
@@ -61,7 +62,7 @@ import app.pulse.ui.screens.DetailScreen
 import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.LibraryScreen
-import app.pulse.ui.screens.LoginScreen
+import app.pulse.ui.screens.DeviceCodeScreen
 import app.pulse.ui.screens.AddToPlaylistSheet
 import app.pulse.ui.screens.LyricsScreen
 import app.pulse.ui.screens.NewPlaylistDialog
@@ -94,6 +95,11 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     var showPicker by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showLogin by remember { mutableStateOf(false) }
+    var deviceCode by remember { mutableStateOf<AuthStore.DeviceCode?>(null) }
+    var codeLoading by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf(false) }
+    var connectError by remember { mutableStateOf<String?>(null) }
+    var pollJob by remember { mutableStateOf<Job?>(null) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var lyricsText by remember { mutableStateOf<String?>(null) }
@@ -121,6 +127,29 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
         { dl: DownloadItem -> dl.filePath?.let { playerVm.playLocalFile(dl.title, dl.uploader, dl.thumbnailUrl, it) }; Unit }
     }
     val removeDl = remember { { dl: DownloadItem -> DownloadManager.remove(dl) } }
+
+    val startConnect: () -> Unit = {
+        showLogin = true; codeLoading = true; connectError = null; deviceCode = null; connecting = false
+        pollJob = scope.launch {
+            val dc = withContext(Dispatchers.IO) { AuthStore.requestDeviceCode() }
+            codeLoading = false
+            if (dc == null) {
+                connectError = "Couldn't start sign-in. Check your connection and try again."
+            } else {
+                deviceCode = dc
+                connecting = true
+                val ok = withContext(Dispatchers.IO) { AuthStore.pollForToken(context, dc) }
+                connecting = false
+                if (ok) {
+                    showLogin = false; deviceCode = null
+                    homeVm.load()
+                    Toast.makeText(context, "Connected — your home is personalized now", Toast.LENGTH_SHORT).show()
+                } else if (connectError == null) {
+                    connectError = "Sign-in wasn't completed. Tap back and try again."
+                }
+            }
+        }
+    }
 
     // Back navigation — exactly one is enabled at a time
     BackHandler(enabled = showLogin || showNewPlaylist || showAddPlaylist || showOverflow || showPicker || showLyrics || showQueue || showSettings || nowPlaying || detailBrowseId != null || tab != PulseTab.Home) {
@@ -245,7 +274,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     s = settings,
                     completedDownloads = downloads.count { it.status == DlStatus.Completed },
                     connected = connected,
-                    onConnect = { showLogin = true },
+                    onConnect = startConnect,
                     onDisconnect = { scope.launch { AuthStore.clear(context); homeVm.load() } },
                     onBack = { showSettings = false },
                     onSetVideo = { settingsVm.setVideo(it) },
@@ -269,9 +298,13 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
 
         if (showLogin) {
             Box(Modifier.fillMaxSize().background(Bg0)) {
-                LoginScreen(
-                    onConnected = { cookies -> scope.launch { AuthStore.save(context, cookies); homeVm.load() }; showLogin = false },
-                    onCancel = { showLogin = false },
+                DeviceCodeScreen(
+                    userCode = deviceCode?.userCode ?: "",
+                    loadingCode = codeLoading,
+                    connecting = connecting,
+                    error = connectError,
+                    onOpenBrowser = { deviceCode?.let { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(it.verificationUrl))) } },
+                    onCancel = { pollJob?.cancel(); showLogin = false; connecting = false; deviceCode = null; connectError = null },
                 )
             }
         }
