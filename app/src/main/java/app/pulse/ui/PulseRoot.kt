@@ -86,7 +86,11 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     Box(Modifier.fillMaxSize().background(Bg0)) {
         Box(Modifier.fillMaxSize()) {
             when (tab) {
-                PulseTab.Home -> HomeScreen(homeState, curUrl, playerUi.isPlaying, play, onRetry = { homeVm.load() })
+                PulseTab.Home -> HomeScreen(
+                    homeState, curUrl, play,
+                    onBrowse = { q -> searchVm.setQuery(q); searchVm.search(); tab = PulseTab.Search },
+                    onRetry = { homeVm.load() },
+                )
                 PulseTab.Search -> SearchScreen(searchState, curUrl, playerUi.isPlaying, searchVm::setQuery, searchVm::search, play)
                 PulseTab.Library -> DownloadsScreen("Library", downloads, onlyCompleted = true, onPlay = playLocal, onRemove = removeDl)
                 PulseTab.Downloads -> DownloadsScreen("Downloads", downloads, onlyCompleted = false, onPlay = playLocal, onRemove = removeDl)
