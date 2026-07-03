@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 27
-        versionName = "0.9.9"
+        versionCode = 28
+        versionName = "0.9.10"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -101,7 +101,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.2.1")
 
     // Ad-free YouTube engine (NewPipe extractor) + HTTP
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3")
+    // Fork of NewPipeExtractor v0.26.3 with Utils.encodeUrlUtf8/decodeUrlUtf8 patched to not use the
+    // API-33 URLEncoder(String,Charset) overload — so search + streaming work on Android < 13.
+    implementation("com.github.luzazzm-stack:NewPipeExtractor:c3d471c84")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Updates the device TLS/security provider on old phones (e.g. Galaxy J7) so HTTPS to YouTube works
