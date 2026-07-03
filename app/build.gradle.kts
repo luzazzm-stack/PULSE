@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "app.pulse"
-        minSdk = 26
+        minSdk = 21
         targetSdk = 33
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         base.archivesName.set("PULSE-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -42,6 +42,7 @@ android {
         }
     }
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -93,8 +94,11 @@ dependencies {
     implementation("androidx.media3:media3-common:1.2.1")
 
     // Ad-free YouTube engine (NewPipe extractor) + HTTP
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.3")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Java 8+ APIs (java.time etc. used by NewPipeExtractor) on Android 5+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Album art / thumbnails
     implementation("io.coil-kt:coil-compose:2.5.0")

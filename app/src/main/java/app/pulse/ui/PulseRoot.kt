@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,10 @@ fun PulseRoot(searchVm: SearchViewModel, playerVm: PlayerViewModel) {
 
     if (nowPlaying) BackHandler { nowPlaying = false }
     val curUrl = playerUi.current?.url
+
+    LaunchedEffect(playerUi.error) {
+        if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
+    }
 
     Box(Modifier.fillMaxSize().background(Bg0)) {
         Box(Modifier.fillMaxSize()) {

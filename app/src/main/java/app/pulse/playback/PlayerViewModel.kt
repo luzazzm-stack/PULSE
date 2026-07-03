@@ -3,6 +3,7 @@ package app.pulse.playback
 import android.app.Application
 import android.content.ComponentName
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.Immutable
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -33,6 +34,7 @@ data class PlayerUi(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val hasCurrent: Boolean = false,
+    val error: String? = null,
 ) {
     val current: StreamItem? get() = items.getOrNull(index)
 }
@@ -90,27 +92,35 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun resolveAndPlay() {
         val item = items.getOrNull(index) ?: return
         resolveJob?.cancel()
-        _ui.update { it.copy(loading = true) }
+        _ui.update { it.copy(loading = true, error = null) }
         resolveJob = viewModelScope.launch {
-            val data = withContext(Dispatchers.IO) { runCatching { Extractor.streamInfo(item.url) }.getOrNull() }
+            val result = withContext(Dispatchers.IO) { runCatching { Extractor.streamInfo(item.url) } }
             val c = controller
-            val audio = data?.audioUrl
-            if (audio != null && c != null) {
-                val mi = MediaItem.Builder()
-                    .setUri(audio)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(item.title)
-                            .setArtist(item.uploader)
-                            .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
-                            .build()
-                    )
-                    .build()
-                c.setMediaItem(mi)
-                c.prepare()
-                c.play()
+            result.onSuccess { data ->
+                val audio = data.audioUrl
+                if (audio != null && c != null) {
+                    val mi = MediaItem.Builder()
+                        .setUri(audio)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(item.title)
+                                .setArtist(item.uploader)
+                                .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                                .build()
+                        )
+                        .build()
+                    c.setMediaItem(mi)
+                    c.prepare()
+                    c.play()
+                    _ui.update { it.copy(loading = false, error = null) }
+                } else {
+                    Log.e("PULSE", "No playable audio stream for ${item.url}")
+                    _ui.update { it.copy(loading = false, error = "No playable stream for this track") }
+                }
+            }.onFailure { e ->
+                Log.e("PULSE", "streamInfo failed for ${item.url}", e)
+                _ui.update { it.copy(loading = false, error = "Couldn't load this track") }
             }
-            _ui.update { it.copy(loading = false) }
         }
     }
 
