@@ -128,18 +128,43 @@ object YtMusic {
         return null
     }
 
-    private fun fetch(browseId: String): JSONObject {
-        val body = JSONObject().apply {
-            put("browseId", browseId)
-            put("context", JSONObject().put("client", JSONObject().apply {
-                put("clientName", "WEB_REMIX")
-                put("clientVersion", CLIENT_VERSION)
-                put("hl", "en")
-                put("gl", "US")
-            }))
+    /** Fetch lyrics for a video, or null if unavailable. */
+    fun lyrics(videoId: String): String? {
+        val next = post("next", JSONObject().apply { put("videoId", videoId); put("context", contextClient()) })
+        val browseId = findLyricsBrowseId(next) ?: return null
+        val root = fetch(browseId)
+        val shelf = findFirst(root, "musicDescriptionShelfRenderer") ?: return null
+        val runs = shelf.o("description")?.a("runs") ?: return null
+        val sb = StringBuilder()
+        for (i in 0 until runs.length()) runs.obj(i)?.s("text")?.let { sb.append(it) }
+        return sb.toString().ifBlank { null }
+    }
+
+    private fun findLyricsBrowseId(node: Any?): String? {
+        when (node) {
+            is JSONObject -> {
+                node.optJSONObject("browseEndpoint")?.let { if (!it.isNull("browseId")) { val b = it.optString("browseId"); if (b.startsWith("MPLYt")) return b } }
+                val keys = node.keys()
+                while (keys.hasNext()) findLyricsBrowseId(node.opt(keys.next()))?.let { return it }
+            }
+            is JSONArray -> for (i in 0 until node.length()) findLyricsBrowseId(node.opt(i))?.let { return it }
         }
+        return null
+    }
+
+    private fun contextClient(): JSONObject = JSONObject().put("client", JSONObject().apply {
+        put("clientName", "WEB_REMIX")
+        put("clientVersion", CLIENT_VERSION)
+        put("hl", "en")
+        put("gl", "US")
+    })
+
+    private fun fetch(browseId: String): JSONObject =
+        post("browse", JSONObject().apply { put("browseId", browseId); put("context", contextClient()) })
+
+    private fun post(endpoint: String, body: JSONObject): JSONObject {
         val builder = okhttp3.Request.Builder()
-            .url("https://music.youtube.com/youtubei/v1/browse?key=$KEY&prettyPrint=false")
+            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false")
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")

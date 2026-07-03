@@ -59,7 +59,9 @@ import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.LibraryScreen
 import app.pulse.ui.screens.LoginScreen
+import app.pulse.ui.screens.LyricsScreen
 import app.pulse.ui.screens.NowPlayingScreen
+import app.pulse.ui.screens.QueueSheet
 import app.pulse.ui.screens.SearchScreen
 import app.pulse.ui.screens.SettingsScreen
 import app.pulse.ui.theme.Bg0
@@ -84,6 +86,10 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     var showPicker by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showLogin by remember { mutableStateOf(false) }
+    var showQueue by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
+    var lyricsText by remember { mutableStateOf<String?>(null) }
+    var lyricsLoading by remember { mutableStateOf(false) }
     var detailBrowseId by remember { mutableStateOf<String?>(null) }
     var detailResult by remember { mutableStateOf<BrowseResult?>(null) }
     var detailLoading by remember { mutableStateOf(false) }
@@ -105,17 +111,35 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val removeDl = remember { { dl: DownloadItem -> DownloadManager.remove(dl) } }
 
     // Back navigation — exactly one is enabled at a time
-    BackHandler(enabled = showLogin) { showLogin = false }
-    BackHandler(enabled = !showLogin && showPicker) { showPicker = false }
-    BackHandler(enabled = !showLogin && !showPicker && showSettings) { showSettings = false }
-    BackHandler(enabled = !showLogin && !showPicker && !showSettings && nowPlaying) { nowPlaying = false }
-    BackHandler(enabled = !showLogin && !showPicker && !showSettings && !nowPlaying && detailBrowseId != null) { detailBrowseId = null }
-    BackHandler(enabled = !showLogin && !showPicker && !showSettings && !nowPlaying && detailBrowseId == null && tab != PulseTab.Home) { tab = PulseTab.Home }
+    BackHandler(enabled = showLogin || showPicker || showLyrics || showQueue || showSettings || nowPlaying || detailBrowseId != null || tab != PulseTab.Home) {
+        when {
+            showLogin -> showLogin = false
+            showPicker -> showPicker = false
+            showLyrics -> showLyrics = false
+            showQueue -> showQueue = false
+            showSettings -> showSettings = false
+            nowPlaying -> nowPlaying = false
+            detailBrowseId != null -> detailBrowseId = null
+            else -> tab = PulseTab.Home
+        }
+    }
 
     LaunchedEffect(playerUi.error) {
         if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
     }
     val curUrl = playerUi.current?.url
+
+    LaunchedEffect(showLyrics, curUrl) {
+        if (showLyrics && curUrl != null) {
+            val vid = android.net.Uri.parse(curUrl).getQueryParameter("v")
+            if (vid != null) {
+                lyricsLoading = true
+                lyricsText = null
+                lyricsText = withContext(Dispatchers.IO) { runCatching { YtMusic.lyrics(vid) }.getOrNull() }
+                lyricsLoading = false
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Bg0)) {
         Box(Modifier.fillMaxSize()) {
@@ -165,6 +189,24 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 onPrev = { playerVm.prev() },
                 onSeek = { playerVm.seekTo(it) },
                 onDownload = { showPicker = true },
+                onLyrics = { showLyrics = true },
+                onQueue = { showQueue = true },
+            )
+        }
+
+        if (showQueue && playerUi.hasCurrent) {
+            QueueSheet(
+                items = playerUi.items, currentIndex = playerUi.index, isPlaying = playerUi.isPlaying,
+                onDismiss = { showQueue = false },
+                onPlayIndex = { playerVm.playList(playerUi.items, it) },
+            )
+        }
+
+        if (showLyrics && playerUi.hasCurrent) {
+            val cur = playerUi.current
+            LyricsScreen(
+                title = cur?.title ?: "", artist = cur?.uploader ?: "",
+                lyrics = lyricsText, loading = lyricsLoading, onClose = { showLyrics = false },
             )
         }
 

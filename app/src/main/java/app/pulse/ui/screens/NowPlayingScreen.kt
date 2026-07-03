@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
@@ -67,6 +69,8 @@ fun NowPlayingScreen(
     onPrev: () -> Unit,
     onSeek: (Long) -> Unit,
     onDownload: () -> Unit,
+    onLyrics: () -> Unit,
+    onQueue: () -> Unit,
 ) {
     val item = ui.current
     if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
@@ -128,6 +132,15 @@ fun NowPlayingScreen(
                 }
                 Box(Modifier.size(52.dp).clickable { onNext() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.SkipNext, "next", tint = Tx0, modifier = Modifier.size(36.dp))
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(48.dp).clickable { onLyrics() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Article, "lyrics", tint = Tx1, modifier = Modifier.size(22.dp))
+                }
+                Box(Modifier.size(48.dp).clickable { onQueue() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.QueueMusic, "queue", tint = Tx1, modifier = Modifier.size(22.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))
