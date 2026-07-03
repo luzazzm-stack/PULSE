@@ -32,7 +32,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,7 +71,9 @@ fun HomeScreen(
     onOpenDetail: (String) -> Unit,
     onRetry: () -> Unit,
     onSettings: () -> Unit,
+    onOpenDownloads: () -> Unit,
 ) {
+    var selectedChip by remember { mutableStateOf(0) }
     val greeting = remember {
         when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
             in 5..11 -> "Good morning"
@@ -90,7 +95,9 @@ fun HomeScreen(
         }
         // chips
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CHIPS.forEachIndexed { i, c -> Chip(c, active = i == 0) }
+            CHIPS.forEachIndexed { i, c ->
+                Chip(c, active = i == selectedChip) { if (i == 3) onOpenDownloads() else selectedChip = i }
+            }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -101,6 +108,9 @@ fun HomeScreen(
                     Text("Couldn't load home.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
                     Spacer(Modifier.size(12.dp))
                     Text("Retry", color = OnRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Red).clickable { onRetry() }.padding(horizontal = 20.dp, vertical = 8.dp))
+                }
+                selectedChip == 2 -> Box(Modifier.align(Alignment.Center).padding(32.dp)) {
+                    Text("No podcasts yet — PULSE is all music for now.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
                 }
                 else -> {
                     val quick = remember_quick(state.shelves)
@@ -187,9 +197,9 @@ private fun Card(card: HomeCard, currentUrl: String?, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Chip(label: String, active: Boolean) {
+private fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
     Text(
         label, color = if (active) OnRed else Tx0, fontSize = 13.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
-        modifier = Modifier.height(32.dp).clip(RoundedCornerShape(99.dp)).background(if (active) Red else Bg3).padding(horizontal = 14.dp, vertical = 6.dp),
+        modifier = Modifier.height(32.dp).clip(RoundedCornerShape(99.dp)).background(if (active) Red else Bg3).clickable { onClick() }.padding(horizontal = 14.dp, vertical = 6.dp),
     )
 }

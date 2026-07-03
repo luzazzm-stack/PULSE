@@ -170,6 +170,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onOpenDetail = { detailBrowseId = it },
                     onRetry = { homeVm.load() },
                     onSettings = { showSettings = true },
+                    onOpenDownloads = { tab = PulseTab.Downloads },
                 )
                 PulseTab.Search -> SearchScreen(
                     searchState, curUrl, playerUi.isPlaying,
