@@ -32,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,10 +69,17 @@ fun HomeScreen(
     onRetry: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    val greeting = remember {
+        when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
+            in 5..11 -> "Good morning"
+            in 12..16 -> "Good afternoon"
+            else -> "Good evening"
+        }
+    }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         // header — greeting + notifications / history / settings
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Good evening", color = Tx0, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f))
+            Text(greeting, color = Tx0, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f))
             Icon(Icons.Rounded.NotificationsNone, "notifications", tint = Tx1, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Rounded.History, "history", tint = Tx1, modifier = Modifier.size(24.dp))

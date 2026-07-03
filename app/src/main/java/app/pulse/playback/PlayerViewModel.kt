@@ -118,13 +118,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleVideoMode() {
         videoMode = !videoMode
         _ui.update { it.copy(videoMode = videoMode) }
-        resolveAndPlay()
+        resolveAndPlay(controller?.currentPosition ?: 0L)  // keep the current position when switching audio<->video
     }
 
     fun exoPlayer(): Player? = controller
     fun seekTo(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0L)) }
 
-    private fun resolveAndPlay() {
+    private fun resolveAndPlay(resumePositionMs: Long = 0L) {
         val item = items.getOrNull(index) ?: return
         resolveJob?.cancel()
         _ui.update { it.copy(loading = true, error = null) }
@@ -146,6 +146,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                         .build()
                     c.setMediaItem(mi)
                     c.prepare()
+                    if (resumePositionMs > 0L) c.seekTo(resumePositionMs)
                     c.play()
                     _ui.update { it.copy(loading = false, error = null) }
                 } else {

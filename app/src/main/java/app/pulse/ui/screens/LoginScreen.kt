@@ -73,6 +73,7 @@ fun LoginScreen(onConnected: (String) -> Unit, onCancel: () -> Unit) {
                 }
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),
+            onRelease = { it.destroy() },
         )
     }
 }

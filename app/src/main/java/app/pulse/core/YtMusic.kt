@@ -176,7 +176,9 @@ object YtMusic {
             builder.header("X-Goog-AuthUser", "0")
         }
         client.newCall(builder.build()).execute().use { resp ->
-            return JSONObject(resp.body?.string() ?: "{}")
+            // YouTube returns HTML (not JSON) on rate-limit/captcha/5xx — never let that throw.
+            val text = resp.body?.string()?.trimStart() ?: "{}"
+            return runCatching { JSONObject(text) }.getOrDefault(JSONObject())
         }
     }
 
@@ -196,7 +198,7 @@ object YtMusic {
     private fun JSONObject.thumbUrl(): String? {
         val thumbs = o("thumbnailRenderer")?.o("musicThumbnailRenderer")?.o("thumbnail")?.a("thumbnails")
             ?: o("thumbnail")?.o("musicThumbnailRenderer")?.o("thumbnail")?.a("thumbnails")
-            ?: o("thumbnail")?.o("thumbnails")?.a("thumbnails")
+            ?: o("thumbnail")?.a("thumbnails")
         return thumbs?.obj(thumbs.length() - 1)?.s("url")
     }
 }

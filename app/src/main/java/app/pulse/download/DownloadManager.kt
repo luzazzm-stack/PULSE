@@ -95,10 +95,12 @@ object DownloadManager {
         if (persist) persist()
     }
 
+    @Synchronized
     private fun persist() {
         val arr = JSONArray()
         _items.value.forEach { arr.put(it.toJson()) }
         runCatching { storeFile.writeText(arr.toString()) }
+            .onFailure { e -> android.util.Log.e("PULSE/DL", "persist failed", e) }
     }
 
     private fun load(): List<DownloadItem> {
