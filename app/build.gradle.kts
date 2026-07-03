@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 25
-        versionName = "0.9.7"
+        versionCode = 26
+        versionName = "0.9.8"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -108,7 +108,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-base:18.5.0")
 
     // Java 8+ APIs (java.time etc. used by NewPipeExtractor) on Android 5+
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
     // Album art / thumbnails
     implementation("io.coil-kt:coil-compose:2.5.0")
