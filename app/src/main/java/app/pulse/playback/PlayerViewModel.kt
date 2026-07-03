@@ -103,6 +103,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         c.play()
     }
 
+    fun addToQueue(item: StreamItem) {
+        if (items.isEmpty()) { playOne(item); return }
+        items = items + item
+        _ui.update { it.copy(items = items) }
+    }
+
     fun next() { if (index < items.lastIndex) { index++; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
     fun prev() { if (index > 0) { index--; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
     fun togglePlay() { val c = controller ?: return; if (c.isPlaying) c.pause() else c.play() }

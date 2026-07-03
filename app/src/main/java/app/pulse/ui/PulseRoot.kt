@@ -1,5 +1,6 @@
 package app.pulse.ui
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -44,6 +45,7 @@ import app.pulse.SearchViewModel
 import app.pulse.SettingsViewModel
 import app.pulse.core.AuthStore
 import app.pulse.core.BrowseResult
+import app.pulse.core.PlaylistStore
 import app.pulse.core.StreamItem
 import app.pulse.core.YtMusic
 import app.pulse.download.DlFormat
@@ -59,8 +61,11 @@ import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
 import app.pulse.ui.screens.LibraryScreen
 import app.pulse.ui.screens.LoginScreen
+import app.pulse.ui.screens.AddToPlaylistSheet
 import app.pulse.ui.screens.LyricsScreen
+import app.pulse.ui.screens.NewPlaylistDialog
 import app.pulse.ui.screens.NowPlayingScreen
+import app.pulse.ui.screens.OverflowSheet
 import app.pulse.ui.screens.QueueSheet
 import app.pulse.ui.screens.SearchScreen
 import app.pulse.ui.screens.SettingsScreen
@@ -78,6 +83,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val downloads by DownloadManager.items.collectAsStateWithLifecycle()
     val settings by settingsVm.state.collectAsStateWithLifecycle()
     val connected by AuthStore.connectedFlow.collectAsStateWithLifecycle()
+    val playlists by PlaylistStore.playlists.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -90,6 +96,10 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     var showLyrics by remember { mutableStateOf(false) }
     var lyricsText by remember { mutableStateOf<String?>(null) }
     var lyricsLoading by remember { mutableStateOf(false) }
+    var showOverflow by remember { mutableStateOf(false) }
+    var showAddPlaylist by remember { mutableStateOf(false) }
+    var showNewPlaylist by remember { mutableStateOf(false) }
+    var overflowTrack by remember { mutableStateOf<StreamItem?>(null) }
     var detailBrowseId by remember { mutableStateOf<String?>(null) }
     var detailResult by remember { mutableStateOf<BrowseResult?>(null) }
     var detailLoading by remember { mutableStateOf(false) }
@@ -111,9 +121,12 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val removeDl = remember { { dl: DownloadItem -> DownloadManager.remove(dl) } }
 
     // Back navigation — exactly one is enabled at a time
-    BackHandler(enabled = showLogin || showPicker || showLyrics || showQueue || showSettings || nowPlaying || detailBrowseId != null || tab != PulseTab.Home) {
+    BackHandler(enabled = showLogin || showNewPlaylist || showAddPlaylist || showOverflow || showPicker || showLyrics || showQueue || showSettings || nowPlaying || detailBrowseId != null || tab != PulseTab.Home) {
         when {
             showLogin -> showLogin = false
+            showNewPlaylist -> showNewPlaylist = false
+            showAddPlaylist -> showAddPlaylist = false
+            showOverflow -> showOverflow = false
             showPicker -> showPicker = false
             showLyrics -> showLyrics = false
             showQueue -> showQueue = false
@@ -164,7 +177,11 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onSearchFor = { q -> searchVm.searchFor(q) }, onClearRecents = searchVm::clearRecents,
                     onClearQuery = searchVm::clearQuery, onPlay = play,
                 )
-                PulseTab.Library -> LibraryScreen(downloads, onPlay = playLocal, onOpenDownloads = { tab = PulseTab.Downloads })
+                PulseTab.Library -> LibraryScreen(
+                    downloads, playlists, onPlay = playLocal,
+                    onPlayPlaylist = { list -> play(list, 0) },
+                    onOpenDownloads = { tab = PulseTab.Downloads },
+                )
                 PulseTab.Downloads -> DownloadsScreen(
                     downloads, onPlay = playLocal, onRemove = removeDl,
                     onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
@@ -191,6 +208,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 onDownload = { showPicker = true },
                 onLyrics = { showLyrics = true },
                 onQueue = { showQueue = true },
+                onMore = { overflowTrack = playerUi.current; showOverflow = true },
             )
         }
 
@@ -245,6 +263,43 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onCancel = { showLogin = false },
                 )
             }
+        }
+
+        if (showOverflow) {
+            overflowTrack?.let { t ->
+                OverflowSheet(
+                    item = t,
+                    onDismiss = { showOverflow = false },
+                    onAddToPlaylist = { showOverflow = false; showAddPlaylist = true },
+                    onAddToQueue = { playerVm.addToQueue(t); showOverflow = false; Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show() },
+                    onDownload = { showOverflow = false; showPicker = true },
+                    onShare = {
+                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, t.url) }, "Share"))
+                        showOverflow = false
+                    },
+                )
+            }
+        }
+
+        if (showAddPlaylist) {
+            AddToPlaylistSheet(
+                playlists = playlists,
+                onDismiss = { showAddPlaylist = false },
+                onNew = { showNewPlaylist = true },
+                onAdd = { pid -> overflowTrack?.let { PlaylistStore.addTrack(pid, it) }; showAddPlaylist = false; Toast.makeText(context, "Added to playlist", Toast.LENGTH_SHORT).show() },
+            )
+        }
+
+        if (showNewPlaylist) {
+            NewPlaylistDialog(
+                onDismiss = { showNewPlaylist = false },
+                onCreate = { name ->
+                    val id = PlaylistStore.create(name)
+                    overflowTrack?.let { PlaylistStore.addTrack(id, it) }
+                    showNewPlaylist = false; showAddPlaylist = false
+                    Toast.makeText(context, "Playlist created", Toast.LENGTH_SHORT).show()
+                },
+            )
         }
     }
 }

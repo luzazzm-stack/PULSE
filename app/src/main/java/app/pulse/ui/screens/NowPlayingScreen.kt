@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -71,6 +72,7 @@ fun NowPlayingScreen(
     onDownload: () -> Unit,
     onLyrics: () -> Unit,
     onQueue: () -> Unit,
+    onMore: () -> Unit,
 ) {
     val item = ui.current
     if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
@@ -141,6 +143,9 @@ fun NowPlayingScreen(
                 }
                 Box(Modifier.size(48.dp).clickable { onQueue() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.QueueMusic, "queue", tint = Tx1, modifier = Modifier.size(22.dp))
+                }
+                Box(Modifier.size(48.dp).clickable { onMore() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.MoreHoriz, "more", tint = Tx1, modifier = Modifier.size(22.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))

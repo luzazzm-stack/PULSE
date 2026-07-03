@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -35,9 +36,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.pulse.core.Playlist
+import app.pulse.core.StreamItem
 import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
 import app.pulse.ui.components.Thumb
@@ -53,7 +57,9 @@ import app.pulse.ui.theme.Tx3
 @Composable
 fun LibraryScreen(
     downloads: List<DownloadItem>,
+    playlists: List<Playlist>,
     onPlay: (DownloadItem) -> Unit,
+    onPlayPlaylist: (List<StreamItem>) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
     val completed = downloads.filter { it.status == DlStatus.Completed }
@@ -88,14 +94,41 @@ fun LibraryScreen(
             Icon(Icons.Rounded.ChevronRight, null, tint = Tx3, modifier = Modifier.size(20.dp))
         }
 
-        if (completed.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text("Download songs to build your offline library.", color = Tx3, fontSize = 13.sp)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 150.dp)) {
+            if (playlists.isNotEmpty()) {
+                item { SectionLabel("PLAYLISTS") }
+                items(playlists, key = { "pl_" + it.id }) { p -> PlaylistRow(p) { if (p.tracks.isNotEmpty()) onPlayPlaylist(p.tracks) } }
             }
-        } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 150.dp)) {
+            if (completed.isNotEmpty()) {
+                item { SectionLabel("DOWNLOADED") }
                 items(completed, key = { it.id }) { dl -> LibRow(dl, onPlay) }
             }
+            if (playlists.isEmpty() && completed.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Text("Download songs or add tracks to a playlist to fill your library.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, color = Tx2, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 6.dp))
+}
+
+@Composable
+private fun PlaylistRow(p: Playlist, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(10.dp)).clickable { onClick() }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Bg2), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.QueueMusic, null, tint = Tx2, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(p.name, color = Tx0, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Playlist · ${p.tracks.size} songs", color = Tx2, fontSize = 12.sp)
         }
     }
 }
