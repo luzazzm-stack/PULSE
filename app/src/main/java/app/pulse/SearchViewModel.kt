@@ -4,8 +4,8 @@ import android.app.Application
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import app.pulse.core.Extractor
 import app.pulse.core.StreamItem
+import app.pulse.core.YtMusic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +46,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         val videos = _state.value.tab == 2
         _state.update { it.copy(loading = true, error = null, searched = true) }
         job = viewModelScope.launch {
-            val res = withContext(Dispatchers.IO) { runCatching { Extractor.searchMusic(q, videos) } }
+            val res = withContext(Dispatchers.IO) { runCatching { YtMusic.search(q, videos) } }
             res.onSuccess { list -> _state.update { it.copy(loading = false, results = list) } }
                 .onFailure { e ->
                     android.util.Log.e("Emma/Search", "search failed", e)

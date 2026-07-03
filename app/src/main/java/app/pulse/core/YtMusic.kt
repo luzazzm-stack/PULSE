@@ -65,6 +65,23 @@ object YtMusic {
         return shelves
     }
 
+    /** Search via InnerTube — the query goes in the JSON body, so it avoids NewPipe's
+     *  URLEncoder.encode(String, Charset) call (an API-33 method that crashes on Android < 13). */
+    fun search(query: String, videos: Boolean = false): List<StreamItem> {
+        val body = JSONObject().apply {
+            put("query", query)
+            put("params", if (videos) "EgWKAQIQAWoMEAMQBBAJEAoQBRAV" else "EgWKAQIIAWoMEAMQBBAJEAoQBRAV")
+            put("context", contextClient())
+        }
+        val tracks = ArrayList<StreamItem>()
+        collectTracks(post("search", body, auth = false), tracks)
+        // Fallback: if the filtered search returned nothing (params rejected), try a plain search.
+        if (tracks.isEmpty()) {
+            collectTracks(post("search", JSONObject().apply { put("query", query); put("context", contextClient()) }, auth = false), tracks)
+        }
+        return tracks.distinctBy { it.url }
+    }
+
     private fun parseCard(item: JSONObject): HomeCard? {
         item.o("musicTwoRowItemRenderer")?.let { r ->
             val title = r.o("title")?.a("runs")?.obj(0)?.s("text") ?: return null
