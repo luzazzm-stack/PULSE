@@ -113,7 +113,18 @@ object YtMusic {
         val videoId = r.o("playlistItemData")?.s("videoId")
             ?: col0?.a("runs")?.obj(0)?.o("navigationEndpoint")?.o("watchEndpoint")?.s("videoId")
             ?: return null
-        return StreamItem("https://www.youtube.com/watch?v=$videoId", title, artist, 0, r.thumbUrl())
+        val durText = r.a("fixedColumns")?.obj(0)?.o("musicResponsiveListItemFixedColumnRenderer")?.o("text")?.a("runs")?.obj(0)?.s("text")
+        return StreamItem("https://www.youtube.com/watch?v=$videoId", title, artist, parseClock(durText), r.thumbUrl())
+    }
+
+    private fun parseClock(s: String?): Long {
+        if (s.isNullOrBlank()) return 0
+        val parts = s.split(":").map { it.trim().toIntOrNull() ?: return 0 }
+        return when (parts.size) {
+            3 -> (parts[0] * 3600 + parts[1] * 60 + parts[2]).toLong()
+            2 -> (parts[0] * 60 + parts[1]).toLong()
+            else -> 0
+        }
     }
 
     private fun findFirst(node: Any?, key: String): JSONObject? {

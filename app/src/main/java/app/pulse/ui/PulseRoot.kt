@@ -164,7 +164,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onBack = { detailBrowseId = null },
                     onPlay = { list, i -> playerVm.playList(list, i, detailResult?.title ?: "PULSE") },
                     onShuffle = { playerVm.playList(it.shuffled(), 0, detailResult?.title ?: "PULSE") },
-                    onDownloadAll = { list -> list.forEach { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, if (settings.defaultVideo) DlFormat.MP4 else DlFormat.M4A) } },
+                    onDownloadAll = { list, audio -> list.forEach { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, if (audio) DlFormat.M4A else DlFormat.MP4) } },
+                    onDownloadTrack = { t, audio -> DownloadManager.enqueue(context, t.url, t.title, t.uploader, t.thumbnailUrl, if (audio) DlFormat.M4A else DlFormat.MP4); Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show() },
+                    onMore = { detailResult?.tracks?.firstOrNull()?.let { overflowTrack = it; showOverflow = true } },
                 )
             } else when (tab) {
                 PulseTab.Home -> HomeScreen(
