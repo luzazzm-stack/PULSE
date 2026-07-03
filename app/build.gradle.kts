@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 24
-        versionName = "0.9.6"
+        versionCode = 25
+        versionName = "0.9.7"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -40,6 +40,12 @@ android {
                 signingConfig = signingConfigs.getByName("shared")
             }
         }
+    }
+    // Two side-by-side builds, one per candidate logo (different applicationId so both install at once).
+    flavorDimensions += "logo"
+    productFlavors {
+        create("nege") { dimension = "logo"; applicationIdSuffix = ".nege" }   // #06 Negative-space E
+        create("beat") { dimension = "logo"; applicationIdSuffix = ".beat" }   // #12 Beat mark
     }
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
