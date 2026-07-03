@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore by preferencesDataStore("pulse_settings")
@@ -38,4 +39,22 @@ object SettingsStore {
     suspend fun setWifiOnly(context: Context, v: Boolean) = context.settingsDataStore.edit { it[K_WIFI] = v }
     suspend fun setPreferVideo(context: Context, v: Boolean) = context.settingsDataStore.edit { it[K_PREFER_VIDEO] = v }
     suspend fun setMaxConcurrent(context: Context, v: Int) = context.settingsDataStore.edit { it[K_MAX] = v }
+}
+
+/** One-time onboarding flag. */
+object OnboardingStore {
+    private val K_DONE = booleanPreferencesKey("onboarding_done")
+
+    @Volatile
+    var done: Boolean = false
+        private set
+
+    suspend fun load(context: Context) {
+        done = context.settingsDataStore.data.map { it[K_DONE] ?: false }.first()
+    }
+
+    suspend fun setDone(context: Context) {
+        done = true
+        context.settingsDataStore.edit { it[K_DONE] = true }
+    }
 }
