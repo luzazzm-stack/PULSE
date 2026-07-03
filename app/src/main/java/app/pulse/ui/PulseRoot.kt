@@ -209,6 +209,8 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 onLyrics = { showLyrics = true },
                 onQueue = { showQueue = true },
                 onMore = { overflowTrack = playerUi.current; showOverflow = true },
+                player = playerVm.exoPlayer(),
+                onToggleVideo = { playerVm.toggleVideoMode() },
             )
         }
 

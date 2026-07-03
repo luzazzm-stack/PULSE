@@ -36,6 +36,7 @@ data class PlayerUi(
     val durationMs: Long = 0L,
     val hasCurrent: Boolean = false,
     val error: String? = null,
+    val videoMode: Boolean = false,
 ) {
     val current: StreamItem? get() = items.getOrNull(index)
 }
@@ -47,6 +48,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var released = false
     private var items: List<StreamItem> = emptyList()
     private var index = 0
+    private var videoMode = false
     private var resolveJob: Job? = null
 
     private val _ui = MutableStateFlow(PlayerUi())
@@ -112,6 +114,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun next() { if (index < items.lastIndex) { index++; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
     fun prev() { if (index > 0) { index--; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
     fun togglePlay() { val c = controller ?: return; if (c.isPlaying) c.pause() else c.play() }
+
+    fun toggleVideoMode() {
+        videoMode = !videoMode
+        _ui.update { it.copy(videoMode = videoMode) }
+        resolveAndPlay()
+    }
+
+    fun exoPlayer(): Player? = controller
     fun seekTo(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0L)) }
 
     private fun resolveAndPlay() {
@@ -122,10 +132,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val result = withContext(Dispatchers.IO) { runCatching { Extractor.streamInfo(item.url) } }
             val c = controller
             result.onSuccess { data ->
-                val audio = data.audioUrl
-                if (audio != null && c != null) {
+                val streamUrl = if (videoMode) (data.videoUrl ?: data.audioUrl) else data.audioUrl
+                if (streamUrl != null && c != null) {
                     val mi = MediaItem.Builder()
-                        .setUri(audio)
+                        .setUri(streamUrl)
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(item.title)

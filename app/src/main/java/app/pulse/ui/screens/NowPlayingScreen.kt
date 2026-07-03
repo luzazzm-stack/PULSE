@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Download
@@ -49,10 +50,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.Player
+import androidx.media3.ui.PlayerView
 import app.pulse.core.msToClock
 import app.pulse.playback.PlayerUi
 import app.pulse.ui.components.Thumb
 import app.pulse.ui.theme.Bg0
+import app.pulse.ui.theme.Bg1
 import app.pulse.ui.theme.Line20
 import app.pulse.ui.theme.OnRed
 import app.pulse.ui.theme.Red
@@ -61,6 +66,7 @@ import app.pulse.ui.theme.Tx1
 import app.pulse.ui.theme.Tx2
 import coil.compose.AsyncImage
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun NowPlayingScreen(
     ui: PlayerUi,
@@ -73,6 +79,8 @@ fun NowPlayingScreen(
     onLyrics: () -> Unit,
     onQueue: () -> Unit,
     onMore: () -> Unit,
+    player: Player?,
+    onToggleVideo: () -> Unit,
 ) {
     val item = ui.current
     if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
@@ -103,7 +111,20 @@ fun NowPlayingScreen(
             }
 
             Spacer(Modifier.weight(1f))
-            Thumb(item.thumbnailUrl, Modifier.fillMaxWidth(0.82f).aspectRatio(1f), 16.dp)
+            if (ui.videoMode && player != null) {
+                AndroidView(
+                    factory = { ctx -> PlayerView(ctx).apply { useController = false; setPlayer(player) } },
+                    update = { it.player = player },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)),
+                )
+            } else {
+                Thumb(item.thumbnailUrl, Modifier.fillMaxWidth(0.82f).aspectRatio(1f), 16.dp)
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.clip(RoundedCornerShape(99.dp)).background(Bg1).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                ModePill("Audio", !ui.videoMode) { if (ui.videoMode) onToggleVideo() }
+                ModePill("Video", ui.videoMode) { if (!ui.videoMode) onToggleVideo() }
+            }
             Spacer(Modifier.weight(1f))
 
             Column(Modifier.fillMaxWidth()) {
@@ -151,4 +172,12 @@ fun NowPlayingScreen(
             Spacer(Modifier.height(20.dp))
         }
     }
+}
+
+@Composable
+private fun ModePill(label: String, active: Boolean, onClick: () -> Unit) {
+    Text(
+        label, color = if (active) OnRed else Tx1, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(if (active) Red else Color.Transparent).clickable { onClick() }.padding(horizontal = 20.dp, vertical = 7.dp),
+    )
 }
