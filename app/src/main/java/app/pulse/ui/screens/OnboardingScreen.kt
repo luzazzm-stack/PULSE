@@ -38,7 +38,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("PULSE", color = Tx0, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
+            Text("Emma", color = Tx0, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
             Spacer(Modifier.size(7.dp))
             Box(Modifier.padding(bottom = 8.dp).size(8.dp).clip(CircleShape).background(Red))
         }

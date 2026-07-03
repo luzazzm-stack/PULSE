@@ -148,11 +148,11 @@ fun SettingsScreen(
             Card {
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text("PULSE", color = Tx0, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                        Text("Emma", color = Tx0, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                         Spacer(Modifier.width(5.dp))
                         Box(Modifier.padding(bottom = 4.dp).size(5.dp).clip(CircleShape).background(Red))
                     }
-                    Text("Version 0.9.4", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Version 0.9.5", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("A native, ad-free player", color = Tx3, fontSize = 12.sp)
                 }
             }
