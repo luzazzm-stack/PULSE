@@ -3,6 +3,7 @@ package app.pulse.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +42,7 @@ import app.pulse.core.HomeCard
 import app.pulse.core.HomeShelf
 import app.pulse.core.StreamItem
 import app.pulse.ui.components.Thumb
+import app.pulse.ui.theme.Bg3
 import app.pulse.ui.theme.OnRed
 import app.pulse.ui.theme.Red
 import app.pulse.ui.theme.Tx0
@@ -57,14 +60,16 @@ fun HomeScreen(
     onSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("PULSE", color = Tx0, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
-            Spacer(Modifier.width(5.dp))
-            Box(Modifier.size(6.dp).clip(CircleShape).background(Red))
-            Spacer(Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Good evening", color = Tx0, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, modifier = Modifier.weight(1f))
             Box(Modifier.size(44.dp).clickable { onSettings() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Settings, "settings", tint = Tx1, modifier = Modifier.size(24.dp))
             }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HomeChip("All", true)
+            HomeChip("Music", false)
+            HomeChip("Podcasts", false)
         }
 
         Box(Modifier.fillMaxSize()) {
@@ -113,4 +118,12 @@ private fun Card(card: HomeCard, currentUrl: String?, onClick: () -> Unit) {
         Text(card.title, color = Tx0, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
         if (card.subtitle.isNotBlank()) Text(card.subtitle, color = Tx1, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
+}
+
+@Composable
+private fun HomeChip(label: String, active: Boolean) {
+    Text(
+        label, color = if (active) OnRed else Tx0, fontSize = 13.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+        modifier = Modifier.height(32.dp).clip(RoundedCornerShape(99.dp)).background(if (active) Red else Bg3).padding(horizontal = 14.dp, vertical = 6.dp),
+    )
 }

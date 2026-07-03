@@ -49,6 +49,7 @@ import app.pulse.ui.components.MiniPlayer
 import app.pulse.ui.components.PulseTab
 import app.pulse.ui.screens.DownloadsScreen
 import app.pulse.ui.screens.HomeScreen
+import app.pulse.ui.screens.LibraryScreen
 import app.pulse.ui.screens.NowPlayingScreen
 import app.pulse.ui.screens.SearchScreen
 import app.pulse.ui.screens.SettingsScreen
@@ -104,8 +105,12 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onSearchFor = { q -> searchVm.searchFor(q) }, onClearRecents = searchVm::clearRecents,
                     onClearQuery = searchVm::clearQuery, onPlay = play,
                 )
-                PulseTab.Library -> DownloadsScreen("Library", downloads, onlyCompleted = true, onPlay = playLocal, onRemove = removeDl)
-                PulseTab.Downloads -> DownloadsScreen("Downloads", downloads, onlyCompleted = false, onPlay = playLocal, onRemove = removeDl)
+                PulseTab.Library -> LibraryScreen(downloads, onPlay = playLocal, onOpenDownloads = { tab = PulseTab.Downloads })
+                PulseTab.Downloads -> DownloadsScreen(
+                    downloads, onPlay = playLocal, onRemove = removeDl,
+                    onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
+                    onBrowse = { tab = PulseTab.Home },
+                )
             }
         }
 
