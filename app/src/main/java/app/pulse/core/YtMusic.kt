@@ -35,35 +35,62 @@ object YtMusic {
     private val JSON = "application/json".toMediaType()
 
     fun home(): List<HomeShelf> {
-        // Try the authed (personalized) YouTube Music home first; if it comes back empty (e.g. the OAuth
-        // token isn't accepted for the music endpoint), fall back to the ANONYMOUS YouTube Music home so
-        // we always show MUSIC — never general YouTube trending/news.
-        val authed = homeShelves(fetch("FEmusic_home", auth = true))
-        return if (authed.isNotEmpty()) authed else homeShelves(fetch("FEmusic_home", auth = false))
-    }
-
-    private fun homeShelves(root: JSONObject): List<HomeShelf> {
-        val sections = root
-            .o("contents")?.o("singleColumnBrowseResultsRenderer")
-            ?.a("tabs")?.obj(0)?.o("tabRenderer")?.o("content")
-            ?.o("sectionListRenderer")?.a("contents")
-            ?: return emptyList()
-
+        // Personalized home when signed in; anonymous otherwise. Walk one continuation for depth, and for
+        // anonymous/thin feeds merge curated New Releases + Charts so the home is never a near-empty wall.
+        val root = fetch("FEmusic_home", auth = AuthStore.connected)
         val shelves = ArrayList<HomeShelf>()
-        for (i in 0 until sections.length()) {
-            val sec = sections.obj(i) ?: continue
-            val carousel = sec.o("musicCarouselShelfRenderer") ?: sec.o("musicImmersiveCarouselShelfRenderer") ?: continue
-            val title = carousel.o("header")?.o("musicCarouselShelfBasicHeaderRenderer")
-                ?.o("title")?.a("runs")?.obj(0)?.s("text") ?: "More"
-            val contents = carousel.a("contents") ?: continue
-            val cards = ArrayList<HomeCard>()
-            for (j in 0 until contents.length()) {
-                parseCard(contents.obj(j) ?: continue)?.let { cards.add(it) }
+        collectShelves(root, shelves)
+        continuationToken(root)?.let { runCatching { collectShelves(fetchContinuation(it, AuthStore.connected), shelves) } }
+        if (!AuthStore.connected || shelves.size < 5) {
+            for (feed in listOf("FEmusic_new_releases", "FEmusic_charts")) {
+                runCatching { collectShelves(fetch(feed, auth = false), shelves) }
             }
-            if (cards.isNotEmpty()) shelves.add(HomeShelf(title, cards))
         }
-        return shelves
+        return shelves.distinctBy { it.title }.filter { it.cards.isNotEmpty() }
     }
+
+    /** Recursively collect every carousel/grid shelf in any browse response (home, charts, new_releases…). */
+    private fun collectShelves(node: Any?, out: MutableList<HomeShelf>) {
+        when (node) {
+            is JSONObject -> {
+                val carousel = node.o("musicCarouselShelfRenderer") ?: node.o("musicImmersiveCarouselShelfRenderer")
+                val grid = node.o("gridRenderer")
+                when {
+                    carousel != null -> addShelf(
+                        carousel.o("header")?.o("musicCarouselShelfBasicHeaderRenderer")?.o("title")?.a("runs")?.obj(0)?.s("text"),
+                        carousel.a("contents"), out)
+                    grid != null -> addShelf(
+                        grid.o("header")?.o("gridHeaderRenderer")?.o("title")?.a("runs")?.obj(0)?.s("text"),
+                        grid.a("items"), out)
+                    else -> { val keys = node.keys(); while (keys.hasNext()) collectShelves(node.opt(keys.next()), out) }
+                }
+            }
+            is JSONArray -> for (i in 0 until node.length()) collectShelves(node.opt(i), out)
+        }
+    }
+
+    private fun addShelf(title: String?, contents: JSONArray?, out: MutableList<HomeShelf>) {
+        if (contents == null) return
+        val cards = ArrayList<HomeCard>()
+        for (j in 0 until contents.length()) parseCard(contents.obj(j) ?: continue)?.let { cards.add(it) }
+        if (cards.isNotEmpty()) out.add(HomeShelf(title ?: "More", cards))
+    }
+
+    private fun continuationToken(node: Any?): String? {
+        when (node) {
+            is JSONObject -> {
+                node.o("nextContinuationData")?.s("continuation")?.let { return it }
+                node.o("reloadContinuationData")?.s("continuation")?.let { return it }
+                node.o("continuationCommand")?.s("token")?.let { return it }
+                val keys = node.keys(); while (keys.hasNext()) continuationToken(node.opt(keys.next()))?.let { return it }
+            }
+            is JSONArray -> for (i in 0 until node.length()) continuationToken(node.opt(i))?.let { return it }
+        }
+        return null
+    }
+
+    private fun fetchContinuation(token: String, auth: Boolean): JSONObject =
+        post("browse", JSONObject().apply { put("continuation", token); put("context", contextClient()) }, auth)
 
     /** Search via InnerTube — the query goes in the JSON body, so it avoids NewPipe's
      *  URLEncoder.encode(String, Charset) call (an API-33 method that crashes on Android < 13). */
@@ -125,7 +152,8 @@ object YtMusic {
             "musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer",
             "musicImmersiveHeaderRenderer", "musicEditablePlaylistDetailHeaderRenderer",
         ).firstNotNullOfOrNull { findFirst(root, it) }
-        val title = header?.o("title")?.a("runs")?.obj(0)?.s("text") ?: "Playlist"
+        val title = header?.o("title")?.a("runs")?.obj(0)?.s("text")
+            ?: if (browseId == LIKED_BROWSE_ID) "Liked Music" else "Playlist"
         val subtitle = header?.o("subtitle")?.a("runs").joinRuns()
         val thumb = header?.thumbUrl() ?: tracks.firstOrNull()?.thumbnailUrl
         return BrowseResult(title, subtitle, thumb, tracks.distinctBy { it.url })
