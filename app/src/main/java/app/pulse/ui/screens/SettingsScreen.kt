@@ -152,7 +152,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(5.dp))
                         Box(Modifier.padding(bottom = 4.dp).size(5.dp).clip(CircleShape).background(Red))
                     }
-                    Text("Version 0.10.4", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Version 0.10.5", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("A native, ad-free player", color = Tx3, fontSize = 12.sp)
                 }
             }
