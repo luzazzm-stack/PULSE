@@ -103,9 +103,22 @@ object YtMusic {
         return null
     }
 
-    /** Fetch an album / playlist / artist page: header + all playable tracks found in the response. */
+    /** The user's YouTube "Liked Music" playlist — needs a connected account. */
+    const val LIKED_BROWSE_ID = "FEmusic_liked_videos"
+
+    /** Like / un-like a track on the user's YouTube account. Call off the main thread. */
+    fun rate(videoId: String, liked: Boolean) {
+        val body = JSONObject().apply {
+            put("target", JSONObject().put("videoId", videoId))
+            put("context", contextClient())
+        }
+        post(if (liked) "like/like" else "like/removelike", body, auth = true)
+    }
+
+    /** Fetch an album / playlist / artist page: header + all playable tracks found in the response.
+     *  Private feeds (FEmusic_*, e.g. Liked Music) are signed with the session cookie. */
     fun browse(browseId: String): BrowseResult {
-        val root = fetch(browseId, auth = false)
+        val root = fetch(browseId, auth = browseId.startsWith("FEmusic_"))
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
         val header = listOf(
@@ -198,19 +211,18 @@ object YtMusic {
         post("browse", JSONObject().apply { put("browseId", browseId); put("context", contextClient()) }, auth)
 
     private fun post(endpoint: String, body: JSONObject, auth: Boolean = true): JSONObject {
-        val token = if (auth) AuthStore.authHeader() else null
-        // With an OAuth token we sign with Bearer and DROP the browser API key; anonymously we use the key.
-        val url = if (token != null) "https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false"
-        else "https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false"
         val builder = okhttp3.Request.Builder()
-            .url(url)
+            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false")
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
-        if (token != null) {
-            builder.header("Authorization", token)
-            builder.header("X-Goog-Request-Time", (System.currentTimeMillis() / 1000).toString())
+        // Cookie + SAPISIDHASH — the same auth the music.youtube.com web app sends. (OAuth Bearer
+        // tokens stopped working for YT Music endpoints in Nov 2024.)
+        if (auth) AuthStore.cookies?.let { c ->
+            builder.header("Cookie", c)
+            AuthStore.sapisidHash()?.let { builder.header("Authorization", it) }
+            builder.header("X-Goog-AuthUser", "0")
         }
         client.newCall(builder.build()).execute().use { resp ->
             // YouTube returns HTML (not JSON) on rate-limit/captcha/5xx — never let that throw.

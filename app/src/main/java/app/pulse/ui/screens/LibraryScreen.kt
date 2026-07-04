@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Sort
@@ -49,6 +50,7 @@ import app.pulse.ui.theme.Bg1
 import app.pulse.ui.theme.Bg2
 import app.pulse.ui.theme.Bg3
 import app.pulse.ui.theme.Line08
+import app.pulse.ui.theme.Red
 import app.pulse.ui.theme.Tx0
 import app.pulse.ui.theme.Tx1
 import app.pulse.ui.theme.Tx2
@@ -61,6 +63,8 @@ fun LibraryScreen(
     onPlay: (DownloadItem) -> Unit,
     onPlayPlaylist: (List<StreamItem>) -> Unit,
     onOpenDownloads: () -> Unit,
+    connected: Boolean,
+    onOpenLiked: () -> Unit,
 ) {
     val completed = downloads.filter { it.status == DlStatus.Completed }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -90,6 +94,23 @@ fun LibraryScreen(
             Column(Modifier.weight(1f)) {
                 Text("Downloaded", color = Tx0, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text("${completed.size} songs · available offline", color = Tx2, fontSize = 12.sp)
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = Tx3, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // pinned Liked Music card — the user's YouTube "Liked Music" playlist
+        Row(
+            Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(64.dp).clip(RoundedCornerShape(12.dp)).background(Bg1).border(1.dp, Line08, RoundedCornerShape(12.dp)).clickable { onOpenLiked() }.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Bg2), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Favorite, null, tint = Red, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Liked Music", color = Tx0, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (connected) "Your liked songs on YouTube Music" else "Connect your account to see liked songs", color = Tx2, fontSize = 12.sp)
             }
             Icon(Icons.Rounded.ChevronRight, null, tint = Tx3, modifier = Modifier.size(20.dp))
         }

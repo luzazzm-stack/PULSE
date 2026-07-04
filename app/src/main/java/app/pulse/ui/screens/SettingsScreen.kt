@@ -80,8 +80,8 @@ fun SettingsScreen(
                 } else {
                     Row(Modifier.fillMaxWidth().height(60.dp).clickable { onConnect() }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Connect session with browser", color = Tx0, fontSize = 15.sp)
-                            Text("Sign in to load your personalized home", color = Tx2, fontSize = 12.sp)
+                            Text("Connect YouTube Music account", color = Tx0, fontSize = 15.sp)
+                            Text("One-time sign-in — personalized home + liked music", color = Tx2, fontSize = 12.sp)
                         }
                         Icon(Icons.Rounded.ChevronRight, null, tint = Tx3, modifier = Modifier.size(18.dp))
                     }
@@ -152,7 +152,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(5.dp))
                         Box(Modifier.padding(bottom = 4.dp).size(5.dp).clip(CircleShape).background(Red))
                     }
-                    Text("Version 0.9.10", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Version 0.10.0", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("A native, ad-free player", color = Tx3, fontSize = 12.sp)
                 }
             }
