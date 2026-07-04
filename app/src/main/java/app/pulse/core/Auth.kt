@@ -46,14 +46,21 @@ object AuthStore {
         cookies = when {
             stored.isNullOrBlank() -> null
             stored.startsWith("enc:") -> decrypt(stored)
-            else -> stored   // legacy plaintext — re-encrypted on next save()
+            else -> stored   // legacy plaintext
+        }
+        // Migrate a legacy plaintext cookie to encrypted-at-rest NOW: an already-signed-in user who upgrades
+        // never calls save() again, so this is the only chance to protect their full-account credential.
+        if (stored != null && !stored.startsWith("enc:") && !cookies.isNullOrBlank()) {
+            encrypt(cookies!!)?.let { enc -> runCatching { context.authDataStore.edit { it[COOKIES_KEY] = enc } } }
         }
         _connected.value = !cookies.isNullOrBlank()
     }
 
     suspend fun save(context: Context, c: String) {
         cookies = c
-        context.authDataStore.edit { it[COOKIES_KEY] = encrypt(c) }
+        // Only persist if we could encrypt it — never write the full-account cookie to disk in cleartext. If the
+        // Keystore is unavailable the session stays in memory for this run (a fresh login is needed next launch).
+        encrypt(c)?.let { enc -> context.authDataStore.edit { it[COOKIES_KEY] = enc } }
         _connected.value = true
     }
 
@@ -97,12 +104,12 @@ object AuthStore {
         return kg.generateKey()
     }
 
-    /** Returns "enc:<base64(iv|ciphertext)>"; falls back to plaintext if the Keystore is unavailable. */
-    private fun encrypt(plain: String): String = runCatching {
+    /** Returns "enc:<base64(iv|ciphertext)>", or null if the Keystore is unavailable (caller then skips persisting). */
+    private fun encrypt(plain: String): String? = runCatching {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, secretKey())
         "enc:" + Base64.encodeToString(c.iv + c.doFinal(plain.toByteArray()), Base64.NO_WRAP)
-    }.getOrDefault(plain)
+    }.getOrNull()
 
     private fun decrypt(stored: String): String? = runCatching {
         val data = Base64.decode(stored.removePrefix("enc:"), Base64.NO_WRAP)

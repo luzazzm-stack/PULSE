@@ -54,6 +54,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var videoMode = false
     private var shuffle = false
     private var repeat = 0
+    private var order: List<Int> = emptyList()   // play order over `items` (identity, or shuffled with current first)
     private var resolveJob: Job? = null
 
     private val _ui = MutableStateFlow(PlayerUi())
@@ -62,7 +63,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = pushState()
         override fun onPlaybackStateChanged(state: Int) {
-            if (state == Player.STATE_ENDED) { if (repeat == 2) resolveAndPlay() else advance(auto = true) }
+            if (state == Player.STATE_ENDED) {
+                // repeat-one: loop the already-buffered track (seek), never re-fetch over the network
+                if (repeat == 2) { controller?.seekTo(0); controller?.play() } else advance(auto = true)
+            }
         }
     }
 
@@ -88,6 +92,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (list.isEmpty()) return
         items = list
         index = startIndex.coerceIn(0, list.lastIndex)
+        rebuildOrder()
         _ui.update { it.copy(items = list, index = index, hasCurrent = true, source = source) }
         resolveAndPlay()
     }
@@ -100,6 +105,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val item = StreamItem(url = filePath, title = title, uploader = uploader, durationSec = 0, thumbnailUrl = thumbnailUrl)
         items = listOf(item)
         index = 0
+        rebuildOrder()
         _ui.update { it.copy(items = items, index = 0, hasCurrent = true, loading = false, error = null) }
         val mi = MediaItem.Builder()
             .setUri(Uri.fromFile(File(filePath)))
@@ -115,38 +121,45 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun addToQueue(item: StreamItem) {
         if (items.isEmpty()) { playOne(item); return }
         items = items + item
+        rebuildOrder()
         _ui.update { it.copy(items = items) }
     }
 
     fun next() = advance(auto = false)
 
-    /** Move to the next track, honoring shuffle + repeat. auto=true means playback ended on its own. */
+    /** Build the play order over `items`: identity, or (shuffled) the current track first then the rest shuffled once. */
+    private fun rebuildOrder() {
+        val idx = items.indices.toMutableList()
+        if (shuffle && items.size > 1) { idx.remove(index); idx.shuffle(); idx.add(0, index) }
+        order = idx
+    }
+
+    private fun goTo(i: Int) { index = i; _ui.update { it.copy(index = index) }; resolveAndPlay() }
+
+    /** Step forward through the play order, honoring shuffle + repeat. auto=true means the track ended on its own. */
     private fun advance(auto: Boolean) {
         if (items.isEmpty()) return
-        val nextIndex = when {
-            shuffle && items.size > 1 -> { var r = index; while (r == index) r = items.indices.random(); r }
-            index < items.lastIndex -> index + 1
-            repeat == 1 -> 0                       // wrap around when repeat-all
-            else -> if (auto) return else index    // end of queue, no repeat: stop (auto) / stay (manual)
+        val pos = order.indexOf(index).coerceAtLeast(0)
+        val nextPos = when {
+            pos < order.lastIndex -> pos + 1
+            repeat == 1 -> 0                 // wrap to the start of the order when repeat-all
+            else -> return                   // end of order, no repeat: stop (manual next is a no-op, not a restart)
         }
-        index = nextIndex
-        _ui.update { it.copy(index = index) }
-        resolveAndPlay()
+        goTo(order[nextPos])
     }
 
     fun prev() {
         if (items.isEmpty()) return
-        val p = when {
-            index > 0 -> index - 1
-            repeat == 1 -> items.lastIndex          // wrap to end when repeat-all
+        val pos = order.indexOf(index).coerceAtLeast(0)
+        val prevPos = when {
+            pos > 0 -> pos - 1
+            repeat == 1 -> order.lastIndex   // wrap to the end of the order when repeat-all
             else -> return
         }
-        index = p
-        _ui.update { it.copy(index = index) }
-        resolveAndPlay()
+        goTo(order[prevPos])
     }
 
-    fun toggleShuffle() { shuffle = !shuffle; _ui.update { it.copy(shuffle = shuffle) } }
+    fun toggleShuffle() { shuffle = !shuffle; rebuildOrder(); _ui.update { it.copy(shuffle = shuffle) } }
     fun cycleRepeat() { repeat = (repeat + 1) % 3; _ui.update { it.copy(repeat = repeat) } }
     fun togglePlay() { val c = controller ?: return; if (c.isPlaying) c.pause() else c.play() }
 
@@ -162,6 +175,22 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun resolveAndPlay(resumePositionMs: Long = 0L) {
         val item = items.getOrNull(index) ?: return
         resolveJob?.cancel()
+        // Downloaded/offline tracks store a raw file path in `url` — play them directly, never via the network extractor.
+        val local = runCatching { File(item.url) }.getOrNull()?.takeIf { it.exists() }
+        if (local != null) {
+            val c = controller ?: return
+            val mi = MediaItem.Builder()
+                .setUri(Uri.fromFile(local))
+                .setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(item.title).setArtist(item.uploader).setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) }).build()
+                )
+                .build()
+            c.setMediaItem(mi); c.prepare()
+            if (resumePositionMs > 0L) c.seekTo(resumePositionMs)
+            c.play()
+            _ui.update { it.copy(loading = false, error = null) }
+            return
+        }
         _ui.update { it.copy(loading = true, error = null) }
         resolveJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { Extractor.streamInfo(item.url) } }

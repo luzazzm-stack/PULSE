@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The session cookie is encrypted with an Android-Keystore key that is NOT backed up, so a restored copy
+     could never be decrypted (and would surface as a confusing silent-logout). Exclude the auth DataStore so a
+     new device starts cleanly signed-out and the user just logs in again. -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/pulse_auth.preferences_pb" />
+</full-backup-content>

@@ -8,6 +8,10 @@ import app.pulse.core.OnboardingStore
 import app.pulse.core.PlaylistStore
 import app.pulse.download.DownloadManager
 import coil.ImageLoader
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -26,7 +30,10 @@ class PulseApp : Application(), ImageLoaderFactory {
         DownloadManager.init(this)
         PlaylistStore.init(this)
         FavoritesStore.init(this)
-        runBlocking { AuthStore.load(this@PulseApp); OnboardingStore.load(this@PulseApp) }
+        runBlocking { OnboardingStore.load(this@PulseApp) }
+        // Load the (Keystore-decrypted) session cookie OFF the main thread so the crypto never delays cold start;
+        // HomeViewModel re-fetches the home when AuthStore.connected flips true.
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch { AuthStore.load(this@PulseApp) }
     }
 
     override fun newImageLoader(): ImageLoader =

@@ -291,9 +291,8 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 LoginScreen(
                     onConnected = { cookies ->
                         scope.launch {
-                            AuthStore.save(context, cookies)
+                            AuthStore.save(context, cookies)   // flips AuthStore.connected → HomeViewModel re-fetches
                             showLogin = false
-                            homeVm.load()
                             Toast.makeText(context, "Connected — your home is personalized now", Toast.LENGTH_SHORT).show()
                         }
                     },

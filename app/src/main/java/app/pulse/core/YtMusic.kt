@@ -35,18 +35,22 @@ object YtMusic {
     private val JSON = "application/json".toMediaType()
 
     fun home(): List<HomeShelf> {
-        // Personalized home when signed in; anonymous otherwise. Walk one continuation for depth, and for
-        // anonymous/thin feeds merge curated New Releases + Charts so the home is never a near-empty wall.
+        // Personalized home when signed in; anonymous otherwise.
         val root = fetch("FEmusic_home", auth = AuthStore.connected)
         val shelves = ArrayList<HomeShelf>()
         collectShelves(root, shelves)
-        continuationToken(root)?.let { runCatching { collectShelves(fetchContinuation(it, AuthStore.connected), shelves) } }
-        if (!AuthStore.connected || shelves.size < 5) {
+        // Dedupe BEFORE judging sparseness — many shelves fall back to the title "More", so a raw count
+        // overstates how many the user actually sees after dedup.
+        var result = shelves.dedupeShelves()
+        // Only pad an ANONYMOUS, thin home with curated global feeds — never mix generic Charts / New Releases
+        // into a signed-in user's personalized home.
+        if (!AuthStore.connected && result.size < 5) {
             for (feed in listOf("FEmusic_new_releases", "FEmusic_charts")) {
                 runCatching { collectShelves(fetch(feed, auth = false), shelves) }
             }
+            result = shelves.dedupeShelves()
         }
-        return shelves.distinctBy { it.title }.filter { it.cards.isNotEmpty() }
+        return result
     }
 
     /** Recursively collect every carousel/grid shelf in any browse response (home, charts, new_releases…). */
@@ -76,21 +80,11 @@ object YtMusic {
         if (cards.isNotEmpty()) out.add(HomeShelf(title ?: "More", cards))
     }
 
-    private fun continuationToken(node: Any?): String? {
-        when (node) {
-            is JSONObject -> {
-                node.o("nextContinuationData")?.s("continuation")?.let { return it }
-                node.o("reloadContinuationData")?.s("continuation")?.let { return it }
-                node.o("continuationCommand")?.s("token")?.let { return it }
-                val keys = node.keys(); while (keys.hasNext()) continuationToken(node.opt(keys.next()))?.let { return it }
-            }
-            is JSONArray -> for (i in 0 until node.length()) continuationToken(node.opt(i))?.let { return it }
-        }
-        return null
-    }
-
-    private fun fetchContinuation(token: String, auth: Boolean): JSONObject =
-        post("browse", JSONObject().apply { put("continuation", token); put("context", contextClient()) }, auth)
+    /** Distinct shelves keyed by title + first card, so headerless "More" shelves with different content survive
+     *  (a plain distinctBy{title} collapses every untitled carousel/grid — and same-titled feeds — into one). */
+    private fun List<HomeShelf>.dedupeShelves(): List<HomeShelf> =
+        filter { it.cards.isNotEmpty() }
+            .distinctBy { it.title + "|" + (it.cards.first().videoId ?: it.cards.first().browseId ?: it.cards.first().title) }
 
     /** Search via InnerTube — the query goes in the JSON body, so it avoids NewPipe's
      *  URLEncoder.encode(String, Charset) call (an API-33 method that crashes on Android < 13). */
@@ -145,9 +139,11 @@ object YtMusic {
     /** Fetch an album / playlist / artist page: header + all playable tracks found in the response.
      *  Private feeds (FEmusic_*, e.g. Liked Music) are signed with the session cookie. */
     fun browse(browseId: String): BrowseResult {
-        // Sign EVERY browse when connected — personal playlists on the home use VL… ids (Liked Music = VLLM,
-        // My Supermix, Discover Mix, My Mix N), not FEmusic_, and return empty without the cookie.
-        val root = fetch(browseId, auth = AuthStore.connected)
+        // Sign PRIVATE feeds when connected — personal playlists use VL… ids (Liked Music = VLLM, My Supermix,
+        // Discover Mix, My Mix N) and FEmusic_* feeds need the cookie. Public albums/playlists (MPRE…, OLAK…,
+        // MPLA…) stay anonymous so they still load if the session cookie has expired.
+        val needsAuth = browseId.startsWith("VL") || browseId.startsWith("FEmusic_")
+        val root = fetch(browseId, auth = AuthStore.connected && needsAuth)
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
         val header = listOf(
