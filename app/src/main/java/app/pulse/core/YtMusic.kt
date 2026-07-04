@@ -145,7 +145,9 @@ object YtMusic {
     /** Fetch an album / playlist / artist page: header + all playable tracks found in the response.
      *  Private feeds (FEmusic_*, e.g. Liked Music) are signed with the session cookie. */
     fun browse(browseId: String): BrowseResult {
-        val root = fetch(browseId, auth = browseId.startsWith("FEmusic_"))
+        // Sign EVERY browse when connected — personal playlists on the home use VL… ids (Liked Music = VLLM,
+        // My Supermix, Discover Mix, My Mix N), not FEmusic_, and return empty without the cookie.
+        val root = fetch(browseId, auth = AuthStore.connected)
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
         val header = listOf(
