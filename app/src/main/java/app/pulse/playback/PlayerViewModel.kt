@@ -38,6 +38,8 @@ data class PlayerUi(
     val error: String? = null,
     val videoMode: Boolean = false,
     val source: String = "Emma",
+    val shuffle: Boolean = false,
+    val repeat: Int = 0,   // 0 = off, 1 = repeat all, 2 = repeat one
 ) {
     val current: StreamItem? get() = items.getOrNull(index)
 }
@@ -50,6 +52,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var items: List<StreamItem> = emptyList()
     private var index = 0
     private var videoMode = false
+    private var shuffle = false
+    private var repeat = 0
     private var resolveJob: Job? = null
 
     private val _ui = MutableStateFlow(PlayerUi())
@@ -57,7 +61,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = pushState()
-        override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) next() }
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_ENDED) { if (repeat == 2) resolveAndPlay() else advance(auto = true) }
+        }
     }
 
     init {
@@ -112,8 +118,36 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(items = items) }
     }
 
-    fun next() { if (index < items.lastIndex) { index++; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
-    fun prev() { if (index > 0) { index--; _ui.update { it.copy(index = index) }; resolveAndPlay() } }
+    fun next() = advance(auto = false)
+
+    /** Move to the next track, honoring shuffle + repeat. auto=true means playback ended on its own. */
+    private fun advance(auto: Boolean) {
+        if (items.isEmpty()) return
+        val nextIndex = when {
+            shuffle && items.size > 1 -> { var r = index; while (r == index) r = items.indices.random(); r }
+            index < items.lastIndex -> index + 1
+            repeat == 1 -> 0                       // wrap around when repeat-all
+            else -> if (auto) return else index    // end of queue, no repeat: stop (auto) / stay (manual)
+        }
+        index = nextIndex
+        _ui.update { it.copy(index = index) }
+        resolveAndPlay()
+    }
+
+    fun prev() {
+        if (items.isEmpty()) return
+        val p = when {
+            index > 0 -> index - 1
+            repeat == 1 -> items.lastIndex          // wrap to end when repeat-all
+            else -> return
+        }
+        index = p
+        _ui.update { it.copy(index = index) }
+        resolveAndPlay()
+    }
+
+    fun toggleShuffle() { shuffle = !shuffle; _ui.update { it.copy(shuffle = shuffle) } }
+    fun cycleRepeat() { repeat = (repeat + 1) % 3; _ui.update { it.copy(repeat = repeat) } }
     fun togglePlay() { val c = controller ?: return; if (c.isPlaying) c.pause() else c.play() }
 
     fun toggleVideoMode() {

@@ -25,6 +25,9 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
@@ -86,6 +89,8 @@ fun NowPlayingScreen(
     source: String,
     liked: Boolean,
     onToggleLike: () -> Unit,
+    onShuffle: () -> Unit,
+    onRepeat: () -> Unit,
 ) {
     val item = ui.current
     if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
@@ -159,6 +164,9 @@ fun NowPlayingScreen(
 
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(48.dp).clickable { onShuffle() }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Shuffle, "shuffle", tint = if (ui.shuffle) Red else Tx1, modifier = Modifier.size(24.dp))
+                }
                 Box(Modifier.size(52.dp).clickable { onPrev() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.SkipPrevious, "previous", tint = Tx0, modifier = Modifier.size(36.dp))
                 }
@@ -168,6 +176,10 @@ fun NowPlayingScreen(
                 }
                 Box(Modifier.size(52.dp).clickable { onNext() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.SkipNext, "next", tint = Tx0, modifier = Modifier.size(36.dp))
+                }
+                Box(Modifier.size(48.dp).clickable { onRepeat() }, contentAlignment = Alignment.Center) {
+                    Icon(if (ui.repeat == 2) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "repeat",
+                        tint = if (ui.repeat > 0) Red else Tx1, modifier = Modifier.size(24.dp))
                 }
             }
             Spacer(Modifier.height(18.dp))

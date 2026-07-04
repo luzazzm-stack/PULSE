@@ -237,6 +237,8 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                         }
                     }
                 },
+                onShuffle = { playerVm.toggleShuffle() },
+                onRepeat = { playerVm.cycleRepeat() },
             )
         }
 

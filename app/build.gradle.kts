@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 31
-        versionName = "0.10.2"
+        versionCode = 32
+        versionName = "0.10.3"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
