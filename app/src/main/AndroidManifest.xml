@@ -9,6 +9,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Read the device's music library so Downloads can surface already-stored local audio.
+         READ_MEDIA_AUDIO is the Android 13+ granular permission; READ_EXTERNAL_STORAGE covers <= API 32. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:name=".PulseApp"
         android:allowBackup="true"

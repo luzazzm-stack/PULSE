@@ -4,7 +4,8 @@ import androidx.compose.runtime.Immutable
 
 enum class DlFormat(val ext: String, val label: String) {
     MP4("mp4", "Video · MP4 (max)"),
-    M4A("m4a", "Audio only · M4A"),
+    M4A("m4a", "Audio · M4A (original)"),
+    MP3("mp3", "Audio · MP3 (converted)"),
 }
 
 enum class DlStatus { Queued, Downloading, Completed, Failed }

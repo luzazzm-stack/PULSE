@@ -3,6 +3,8 @@ package app.pulse.ui
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -41,10 +43,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.pulse.HomeViewModel
+import app.pulse.LocalMusicViewModel
 import app.pulse.SearchViewModel
 import app.pulse.SettingsViewModel
+import app.pulse.core.AUDIO_PERMISSION
 import app.pulse.core.AuthStore
 import app.pulse.core.BrowseResult
+import app.pulse.core.hasAudioPermission
 import app.pulse.core.FavoritesStore
 import app.pulse.core.PlaylistStore
 import app.pulse.core.StreamItem
@@ -77,7 +82,7 @@ import app.pulse.ui.theme.Tx0
 import app.pulse.ui.theme.Tx2
 
 @Composable
-fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: PlayerViewModel, settingsVm: SettingsViewModel) {
+fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: PlayerViewModel, settingsVm: SettingsViewModel, localVm: LocalMusicViewModel) {
     val homeState by homeVm.state.collectAsStateWithLifecycle()
     val searchState by searchVm.state.collectAsStateWithLifecycle()
     val playerUi by playerVm.ui.collectAsStateWithLifecycle()
@@ -86,8 +91,18 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val connected by AuthStore.connectedFlow.collectAsStateWithLifecycle()
     val playlists by PlaylistStore.playlists.collectAsStateWithLifecycle()
     val likedSet by FavoritesStore.liked.collectAsStateWithLifecycle()
+    val localTracks by localVm.tracks.collectAsStateWithLifecycle()
+    val localScanning by localVm.scanning.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Device music-library permission + one-shot scan for the Downloads "On this device" section.
+    var hasAudio by remember { mutableStateOf(hasAudioPermission(context)) }
+    val audioPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasAudio = granted
+        if (granted) localVm.scan(force = true)
+    }
+    LaunchedEffect(Unit) { if (hasAudio) localVm.scan() }
 
     var tab by remember { mutableStateOf(PulseTab.Home) }
     var nowPlaying by remember { mutableStateOf(false) }
@@ -196,7 +211,14 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onOpenLiked = { if (connected) detailBrowseId = YtMusic.LIKED_BROWSE_ID else startConnect() },
                 )
                 PulseTab.Downloads -> DownloadsScreen(
-                    downloads, onPlay = playLocal, onRemove = removeDl,
+                    items = downloads,
+                    localTracks = localTracks,
+                    hasAudioPermission = hasAudio,
+                    scanningLocal = localScanning,
+                    onRequestPermission = { audioPermLauncher.launch(AUDIO_PERMISSION) },
+                    onRescanLocal = { localVm.scan(force = true) },
+                    onPlayLocal = { i -> playerVm.playList(localTracks, i, "On this device") },
+                    onPlay = playLocal, onRemove = removeDl,
                     onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
                     onBrowse = { tab = PulseTab.Home },
                 )
@@ -207,7 +229,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
             if (playerUi.hasCurrent) {
                 MiniPlayer(playerUi, onTap = { nowPlaying = true }, onPlayPause = { playerVm.togglePlay() }, onNext = { playerVm.next() })
             }
-            BottomBar(tab) { tab = it }
+            // Tapping a bottom tab must also dismiss any open album/playlist/detail overlay — otherwise the
+            // DetailScreen (which wins the `detailBrowseId != null` branch above) keeps painting over the tab.
+            BottomBar(tab) { selected -> detailBrowseId = null; tab = selected }
         }
 
         if (nowPlaying && playerUi.hasCurrent) {
@@ -350,7 +374,8 @@ private fun DownloadPicker(onDismiss: () -> Unit, onPick: (DlFormat) -> Unit) {
             Text("Download", color = Tx0, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.size(10.dp))
             PickerRow(DlFormat.MP4, "Best quality video, larger file", recommended = true, onPick)
-            PickerRow(DlFormat.M4A, "Audio only, smaller file", recommended = false, onPick)
+            PickerRow(DlFormat.M4A, "Audio only, original quality", recommended = false, onPick)
+            PickerRow(DlFormat.MP3, "Audio, converted to MP3 (universal)", recommended = false, onPick)
         }
     }
 }

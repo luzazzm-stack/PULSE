@@ -34,7 +34,8 @@ class MainActivity : ComponentActivity() {
                 val searchVm: SearchViewModel = viewModel()
                 val playerVm: PlayerViewModel = viewModel()
                 val settingsVm: SettingsViewModel = viewModel()
-                PulseRoot(homeVm, searchVm, playerVm, settingsVm)
+                val localVm: LocalMusicViewModel = viewModel()
+                PulseRoot(homeVm, searchVm, playerVm, settingsVm, localVm)
 
                 if (!onboarded) {
                     OnboardingScreen(onDone = { scope.launch { OnboardingStore.setDone(context) }; onboarded = true })

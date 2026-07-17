@@ -3,6 +3,7 @@ package app.pulse.playback
 import android.app.Application
 import android.content.ComponentName
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import androidx.compose.runtime.Immutable
 import androidx.core.content.ContextCompat
@@ -12,9 +13,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import app.pulse.core.Extractor
 import app.pulse.core.StreamItem
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -70,9 +75,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Receives the service's broadcasts fired when a lock-screen / Bluetooth / notification button is
+     * pressed: the ForwardingPlayer in PlaybackService can't navigate the (single-item) timeline itself,
+     * so it delegates skip + stop back here to the real manual queue.
+     */
+    private val commandListener = object : MediaController.Listener {
+        override fun onCustomCommand(controller: MediaController, command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+            when (command.customAction) {
+                CMD_ADVANCE -> advance(auto = false)
+                CMD_PREV -> prev()
+                CMD_STOP -> clearAll()
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
     init {
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
-        val f = MediaController.Builder(app, token).buildAsync()
+        val f = MediaController.Builder(app, token).setListener(commandListener).buildAsync()
         future = f
         f.addListener({
             if (!released) { controller = f.get().also { it.addListener(listener) }; pushState() }
@@ -163,6 +184,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun cycleRepeat() { repeat = (repeat + 1) % 3; _ui.update { it.copy(repeat = repeat) } }
     fun togglePlay() { val c = controller ?: return; if (c.isPlaying) c.pause() else c.play() }
 
+    /** Fully stop and clear the queue (fired by the notification Close button). Resets the UI so the mini-player disappears. */
+    fun clearAll() {
+        resolveJob?.cancel()
+        items = emptyList(); index = 0; order = emptyList(); videoMode = false; shuffle = false; repeat = 0
+        _ui.value = PlayerUi()
+    }
+
     fun toggleVideoMode() {
         videoMode = !videoMode
         _ui.update { it.copy(videoMode = videoMode) }
@@ -175,12 +203,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun resolveAndPlay(resumePositionMs: Long = 0L) {
         val item = items.getOrNull(index) ?: return
         resolveJob?.cancel()
-        // Downloaded/offline tracks store a raw file path in `url` — play them directly, never via the network extractor.
-        val local = runCatching { File(item.url) }.getOrNull()?.takeIf { it.exists() }
-        if (local != null) {
+        // Offline sources play directly, never via the network extractor: downloaded files store a raw
+        // path in `url`; device-library tracks store a MediaStore content:// uri.
+        val directUri: Uri? = when {
+            item.url.startsWith("content://") -> Uri.parse(item.url)
+            else -> runCatching { File(item.url) }.getOrNull()?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
+        }
+        if (directUri != null) {
             val c = controller ?: return
             val mi = MediaItem.Builder()
-                .setUri(Uri.fromFile(local))
+                .setUri(directUri)
                 .setMediaMetadata(
                     MediaMetadata.Builder().setTitle(item.title).setArtist(item.uploader).setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) }).build()
                 )

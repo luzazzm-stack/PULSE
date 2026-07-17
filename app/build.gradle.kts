@@ -11,8 +11,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 21
         targetSdk = 33
-        versionCode = 34
-        versionName = "0.10.5"
+        versionCode = 35
+        versionName = "0.11.0"
         base.archivesName.set("Emma-v$versionName")
         vectorDrawables.useSupportLibrary = true
     }
@@ -114,4 +114,9 @@ dependencies {
 
     // Album art / thumbnails
     implementation("io.coil-kt:coil-compose:2.5.0")
+
+    // On-device MP3 encoder (LAME JNI wrapper) — vendored .aar (all 4 ABIs incl. x86_64).
+    // Vendored rather than pulled from JitPack because that build is broken (only a cached
+    // artifact serves); the local copy makes CI reproducible. Used by download/Mp3Transcoder.kt.
+    implementation(files("libs/TAndroidLame-1.1.aar"))
 }

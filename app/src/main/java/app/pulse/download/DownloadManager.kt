@@ -13,16 +13,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** Downloads YouTube streams (MP4 max / M4A audio) to app storage with progress; persists across launches. */
+/** Downloads YouTube streams (MP4 max / M4A audio / MP3 transcoded) to app storage with progress; persists across launches. */
 object DownloadManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient()
+    // AndroidLame wraps a single global native encoder, so overlapping transcodes corrupt each other — serialize them.
+    private val transcodeMutex = Mutex()
     private val _items = MutableStateFlow<List<DownloadItem>>(emptyList())
     val items: StateFlow<List<DownloadItem>> = _items.asStateFlow()
 
@@ -61,10 +65,37 @@ object DownloadManager {
         if (streamUrl == null) { fail(start); return }
 
         val dir = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+
+        if (start.format == DlFormat.MP3) {
+            // YouTube never serves MP3 — download the AAC/M4A audio to a temp file, then transcode on-device.
+            // Downloading fills ~85% of the bar; the transcode fills the rest. The temp is always removed.
+            val tmp = File(dir, "${start.id}.src.tmp")
+            try {
+                val fetched = fetchToFile(streamUrl, tmp) { p -> upsert(start.copy(status = DlStatus.Downloading, progress = p * 0.85f), persist = false) }
+                if (!fetched) { fail(start); return }
+                upsert(start.copy(status = DlStatus.Downloading, progress = 0.9f), persist = false)
+                val mp3 = File(dir, "${start.id}.mp3")
+                runCatching { transcodeMutex.withLock { Mp3Transcoder.transcode(tmp, mp3) } }
+                    .onFailure { e -> Log.e("PULSE", "mp3 transcode failed", e); mp3.delete(); fail(start); return }
+                upsert(start.copy(status = DlStatus.Completed, progress = 1f, filePath = mp3.absolutePath), persist = true)
+            } finally {
+                tmp.delete()
+            }
+            return
+        }
+
         val file = File(dir, "${start.id}.${start.format.ext}")
-        val req = okhttp3.Request.Builder().url(streamUrl).header("User-Agent", NewPipeDownloader.USER_AGENT).build()
+        val fetched = fetchToFile(streamUrl, file) { p -> upsert(start.copy(status = DlStatus.Downloading, progress = p), persist = false) }
+        if (!fetched) { fail(start); return }
+        upsert(start.copy(status = DlStatus.Completed, progress = 1f, filePath = file.absolutePath), persist = true)
+    }
+
+    /** Streams [url] to [file], reporting fractional progress (0f..1f) when the content length is known. Returns false on a null body. */
+    private fun fetchToFile(url: String, file: File, onProgress: (Float) -> Unit): Boolean {
+        val req = okhttp3.Request.Builder().url(url).header("User-Agent", NewPipeDownloader.USER_AGENT).build()
         client.newCall(req).execute().use { resp ->
-            val body = resp.body ?: run { fail(start); return }
+            if (!resp.isSuccessful) return false   // an expired/403 googlevideo URL still has a body — don't save the error page
+            val body = resp.body ?: return false
             val total = body.contentLength()
             var lastPct = -1
             file.outputStream().use { out ->
@@ -77,13 +108,13 @@ object DownloadManager {
                         read += n
                         if (total > 0) {
                             val pct = ((read * 100) / total).toInt()
-                            if (pct != lastPct) { lastPct = pct; upsert(start.copy(status = DlStatus.Downloading, progress = pct / 100f), persist = false) }
+                            if (pct != lastPct) { lastPct = pct; onProgress(pct / 100f) }
                         }
                     }
                 }
             }
         }
-        upsert(start.copy(status = DlStatus.Completed, progress = 1f, filePath = file.absolutePath), persist = true)
+        return true
     }
 
     private fun fail(rec: DownloadItem) = upsert(rec.copy(status = DlStatus.Failed), persist = true)
