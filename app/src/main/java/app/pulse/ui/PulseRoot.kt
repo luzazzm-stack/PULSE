@@ -24,12 +24,16 @@ import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,6 +108,20 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     }
     LaunchedEffect(Unit) { if (hasAudio) localVm.scan() }
 
+    // Re-check the audio permission on every RESUME, so a grant made from system Settings (after the in-app
+    // request was permanently denied) is picked up without needing a full app restart.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val granted = hasAudioPermission(context)
+                if (granted != hasAudio) { hasAudio = granted; if (granted) localVm.scan(force = true) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     var tab by remember { mutableStateOf(PulseTab.Home) }
     var nowPlaying by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
@@ -158,6 +176,12 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
 
     LaunchedEffect(playerUi.error) {
         if (playerUi.error != null) Toast.makeText(context, playerUi.error, Toast.LENGTH_SHORT).show()
+    }
+
+    // When playback is fully cleared (notification Close), close any open player overlay so it doesn't
+    // auto-reopen the next time a track starts.
+    LaunchedEffect(playerUi.hasCurrent) {
+        if (!playerUi.hasCurrent) { nowPlaying = false; showQueue = false; showLyrics = false }
     }
     val curUrl = playerUi.current?.url
 
@@ -303,9 +327,16 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
             DownloadPicker(
                 onDismiss = { showPicker = false },
                 onPick = { fmt ->
-                    playerUi.current?.let { c -> DownloadManager.enqueue(context, c.url, c.title, c.uploader, c.thumbnailUrl, fmt) }
+                    playerUi.current?.let { c ->
+                        if (c.url.startsWith("content://")) {
+                            // A device-library track — it's already stored locally; there's nothing to download.
+                            Toast.makeText(context, "This song is already on your device", Toast.LENGTH_SHORT).show()
+                        } else {
+                            DownloadManager.enqueue(context, c.url, c.title, c.uploader, c.thumbnailUrl, fmt)
+                            Toast.makeText(context, "Download started — see the Downloads tab", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     showPicker = false
-                    Toast.makeText(context, "Download started — see the Downloads tab", Toast.LENGTH_SHORT).show()
                 },
             )
         }

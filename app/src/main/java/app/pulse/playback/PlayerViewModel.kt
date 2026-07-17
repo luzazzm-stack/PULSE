@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -61,6 +62,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var repeat = 0
     private var order: List<Int> = emptyList()   // play order over `items` (identity, or shuffled with current first)
     private var resolveJob: Job? = null
+    // Set true by clearAll() so the STATE_ENDED that clearing the queue emits doesn't trigger auto-advance.
+    private var suppressAutoAdvance = false
 
     private val _ui = MutableStateFlow(PlayerUi())
     val ui = _ui.asStateFlow()
@@ -69,9 +72,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         override fun onEvents(player: Player, events: Player.Events) = pushState()
         override fun onPlaybackStateChanged(state: Int) {
             if (state == Player.STATE_ENDED) {
+                if (suppressAutoAdvance) { suppressAutoAdvance = false; return }  // queue was just cleared (Close), don't advance
                 // repeat-one: loop the already-buffered track (seek), never re-fetch over the network
                 if (repeat == 2) { controller?.seekTo(0); controller?.play() } else advance(auto = true)
             }
+        }
+        override fun onPlayerError(error: PlaybackException) {
+            // A source failed to play (e.g. a device-library track deleted since the last scan, or a dead
+            // stream URL). Surface it and skip to the next track instead of the UI looking stuck.
+            Log.e("PULSE", "player error for ${items.getOrNull(index)?.url}", error)
+            _ui.update { it.copy(loading = false, error = "Couldn't play this track") }
+            advance(auto = true)
         }
     }
 
@@ -111,6 +122,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playList(list: List<StreamItem>, startIndex: Int, source: String = "Emma") {
         if (list.isEmpty()) return
+        suppressAutoAdvance = false
         items = list
         index = startIndex.coerceIn(0, list.lastIndex)
         rebuildOrder()
@@ -171,11 +183,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun prev() {
         if (items.isEmpty()) return
+        // Media convention: more than 3s into the track, "previous" restarts the current track instead of skipping.
+        if ((controller?.currentPosition ?: 0L) > 3000L) { controller?.seekTo(0); return }
         val pos = order.indexOf(index).coerceAtLeast(0)
         val prevPos = when {
             pos > 0 -> pos - 1
             repeat == 1 -> order.lastIndex   // wrap to the end of the order when repeat-all
-            else -> return
+            else -> { controller?.seekTo(0); return }   // at the first track: restart it rather than a dead no-op
         }
         goTo(order[prevPos])
     }
@@ -186,8 +200,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Fully stop and clear the queue (fired by the notification Close button). Resets the UI so the mini-player disappears. */
     fun clearAll() {
+        suppressAutoAdvance = true   // set BEFORE clearing so the STATE_ENDED from clearMediaItems() doesn't auto-advance
         resolveJob?.cancel()
         items = emptyList(); index = 0; order = emptyList(); videoMode = false; shuffle = false; repeat = 0
+        controller?.let { it.stop(); it.clearMediaItems() }   // stops playback + removes the media notification
         _ui.value = PlayerUi()
     }
 

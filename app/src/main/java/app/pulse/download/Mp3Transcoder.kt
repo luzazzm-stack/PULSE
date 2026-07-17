@@ -62,6 +62,7 @@ object Mp3Transcoder {
             var mp3Buf = ByteArray(0)
             var sawInputEOS = false
             var sawOutputEOS = false
+            var stallGuard = 0   // guards against a malformed file whose decoder never emits an EOS output buffer
 
             fun buildLame(rate: Int, ch: Int) = LameBuilder()
                 .setInSampleRate(rate)
@@ -92,15 +93,22 @@ object Mp3Transcoder {
                 val outIndex = codec.dequeueOutputBuffer(info, TIMEOUT_US)
                 when {
                     outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        stallGuard = 0
                         val of = codec.outputFormat
                         sampleRate = of.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         channels = of.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                         lame?.close()
                         lame = buildLame(sampleRate, channels)
                     }
-                    outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> { /* nothing ready */ }
+                    outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        // After input EOS the decoder should flush its remaining frames quickly; if it never
+                        // surfaces an EOS output buffer (corrupt/truncated file), bail instead of looping forever
+                        // and holding transcodeMutex. ~3000 * TIMEOUT_US (10ms) ≈ 30s of pure stall.
+                        if (sawInputEOS && ++stallGuard > 3000) error("MP3 transcode stalled: decoder emitted no end-of-stream")
+                    }
                     outIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> { /* deprecated; ignore */ }
                     outIndex >= 0 -> {
+                        stallGuard = 0
                         if (info.size > 0) {
                             // Fallback: some devices deliver PCM before firing FORMAT_CHANGED.
                             if (lame == null) lame = buildLame(sampleRate, channels)

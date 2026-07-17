@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -19,6 +20,8 @@ import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 
 /** Downloads YouTube streams (MP4 max / M4A audio / MP3 transcoded) to app storage with progress; persists across launches. */
 object DownloadManager {
@@ -27,6 +30,10 @@ object DownloadManager {
     private val client = OkHttpClient()
     // AndroidLame wraps a single global native encoder, so overlapping transcodes corrupt each other — serialize them.
     private val transcodeMutex = Mutex()
+    // Per-id download coroutine, so remove() can cancel an in-flight download; and a set of ids the user removed,
+    // so a still-running download's late upsert can't resurrect it as a "zombie" Completed entry.
+    private val jobs = ConcurrentHashMap<String, Job>()
+    private val cancelledIds = Collections.synchronizedSet(HashSet<String>())
     private val _items = MutableStateFlow<List<DownloadItem>>(emptyList())
     val items: StateFlow<List<DownloadItem>> = _items.asStateFlow()
 
@@ -44,15 +51,22 @@ object DownloadManager {
         val id = (Uri.parse(url).getQueryParameter("v") ?: url.hashCode().toString()) + "_" + format.ext
         val existing = _items.value.firstOrNull { it.id == id }
         if (existing != null && existing.status != DlStatus.Failed) return
+        cancelledIds.remove(id)   // re-enqueue (e.g. retry) clears any prior removal
         val rec = DownloadItem(id, url, title, uploader, thumbnailUrl, format, DlStatus.Queued)
         upsert(rec, persist = true)
         val app = context.applicationContext
-        scope.launch {
-            runCatching { download(app, rec) }.onFailure { e -> Log.e("PULSE", "download failed", e); fail(rec) }
+        jobs[id] = scope.launch {
+            try {
+                runCatching { download(app, rec) }.onFailure { e -> Log.e("PULSE", "download failed", e); fail(rec) }
+            } finally {
+                jobs.remove(id)
+            }
         }
     }
 
     fun remove(item: DownloadItem) {
+        cancelledIds.add(item.id)          // block any late upsert from the still-running coroutine
+        jobs.remove(item.id)?.cancel()     // stop wasting network/CPU on a download the user removed
         item.filePath?.let { runCatching { File(it).delete() } }
         _items.update { list -> list.filterNot { it.id == item.id } }
         persist()
@@ -120,6 +134,7 @@ object DownloadManager {
     private fun fail(rec: DownloadItem) = upsert(rec.copy(status = DlStatus.Failed), persist = true)
 
     private fun upsert(rec: DownloadItem, persist: Boolean) {
+        if (cancelledIds.contains(rec.id)) return   // user removed this download — don't let a late write resurrect it
         _items.update { list ->
             if (list.any { it.id == rec.id }) list.map { if (it.id == rec.id) rec else it } else list + rec
         }

@@ -104,11 +104,13 @@ class PlaybackService : MediaSessionService() {
             args: Bundle,
         ): ListenableFuture<SessionResult> = when (customCommand.customAction) {
             CMD_STOP -> {
-                // Tell the ViewModel to reset its UI (hide the mini-player), then tear down playback +
-                // the notification. clearMediaItems() is what actually removes the media notification.
+                // Tell the ViewModel to reset its UI (hide the mini-player), then tear down playback + the
+                // notification. stop() BEFORE clearMediaItems() so the player goes to IDLE (not ENDED) and the
+                // ViewModel never treats the close as an end-of-track auto-advance. clearMediaItems() removes
+                // the media notification; stopSelf() covers the app-swiped-away case where no controller is bound.
                 session.broadcastCustomCommand(SessionCommand(CMD_STOP, Bundle.EMPTY), Bundle.EMPTY)
-                session.player.clearMediaItems()
                 session.player.stop()
+                session.player.clearMediaItems()
                 stopSelf()
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
