@@ -1,7 +1,12 @@
 package app.pulse.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,7 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pulse.core.Playlist
 import app.pulse.core.StreamItem
+import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.Thumb
 import app.pulse.ui.theme.Bg1
 import app.pulse.ui.theme.Bg2
@@ -61,7 +69,9 @@ import app.pulse.ui.theme.Tx3
 private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(Color(0xCC000000))) {
         Box(Modifier.weight(1f).fillMaxWidth().clickable { onDismiss() })
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(Bg1).navigationBarsPadding().padding(bottom = 8.dp)) {
+        // Panel-level tap consumer: taps on panel dead areas (titles, padding) must neither reach
+        // the scrim's dismiss nor pass through the overlay; row clickables are children and win.
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(Bg1).pointerInput(Unit) { detectTapGestures { } }.navigationBarsPadding().padding(bottom = 8.dp)) {
             content()
         }
     }
@@ -88,7 +98,18 @@ fun OverflowSheet(item: StreamItem, onDismiss: () -> Unit, onAddToPlaylist: () -
 
 @Composable
 private fun ActionRow(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(52.dp).clickable { onClick() }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Pressed-state dip: the animated scale is read only inside the graphicsLayer block, so the
+    // press animation runs entirely in the layer/draw phase — zero extra recompositions.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, AnimSpecs.fast(), label = "pressScale")
+    Row(
+        Modifier.fillMaxWidth().height(52.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clickable(interactionSource = interaction, indication = LocalIndication.current) { onClick() }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(icon, null, tint = Tx1, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(16.dp))
         Text(label, color = Tx0, fontSize = 15.sp)
@@ -127,7 +148,10 @@ fun AddToPlaylistSheet(playlists: List<Playlist>, onDismiss: () -> Unit, onNew: 
 fun NewPlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     Box(Modifier.fillMaxSize().background(Color(0xCC000000)).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
-        Column(Modifier.padding(28.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Bg2).padding(20.dp)) {
+        // Card-level tap consumer: without it, taps on the card's own padding bubble to the scrim's
+        // clickable above and dismiss the dialog mid-typing. The scrim (outside the card, incl. the
+        // 28.dp margin) still dismisses; Cancel/Create/text field are children and win.
+        Column(Modifier.padding(28.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Bg2).pointerInput(Unit) { detectTapGestures { } }.padding(20.dp)) {
             Text("New playlist", color = Tx0, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Line08))

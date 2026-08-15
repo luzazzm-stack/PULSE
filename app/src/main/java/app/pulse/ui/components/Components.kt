@@ -33,13 +33,18 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -59,12 +64,17 @@ import app.pulse.ui.theme.Tx1
 import app.pulse.ui.theme.Tx2
 import app.pulse.ui.theme.Tx4
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @Composable
 fun Thumb(url: String?, modifier: Modifier = Modifier, corner: Dp = 8.dp) {
+    // 200 ms Coil crossfade — the same spec Detail/Category/Downloads/GenreTiles art already
+    // uses, so every art surface resolves in with one consistent fade instead of popping.
+    val context = LocalContext.current
+    val request = remember(url) { ImageRequest.Builder(context).data(url).crossfade(200).build() }
     Box(modifier.clip(RoundedCornerShape(corner)).background(Bg3), contentAlignment = Alignment.Center) {
         Icon(Icons.Rounded.MusicNote, null, tint = Tx4, modifier = Modifier.size(20.dp))
-        AsyncImage(model = url, contentDescription = null, modifier = Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+        AsyncImage(model = request, contentDescription = null, modifier = Modifier.matchParentSize(), contentScale = ContentScale.Crop)
     }
 }
 
@@ -111,7 +121,13 @@ fun StreamRow(item: StreamItem, isCurrent: Boolean, isPlaying: Boolean, onClick:
 
 @Composable
 fun MiniPlayer(ui: PlayerUi, onTap: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, modifier: Modifier = Modifier) {
-    val item = ui.current ?: return
+    // Remember the last non-null track so the bar can still draw itself while its exit animation
+    // runs after playback is cleared (ui.current -> null). Contract unchanged: renders nothing if
+    // no track was ever set. Display always prefers the live ui.current when present.
+    val current = ui.current
+    var lastItem by remember { mutableStateOf(current) }
+    SideEffect { if (current != null && current != lastItem) lastItem = current }
+    val item = current ?: lastItem ?: return
     val progress = if (ui.durationMs > 0) (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) else 0f
     Column(modifier.fillMaxWidth().background(Bg2)) {
         Box(Modifier.fillMaxWidth().height(2.dp).background(Line08)) {

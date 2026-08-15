@@ -21,4 +21,7 @@ data class DownloadItem(
     val status: DlStatus,
     val progress: Float = 0f,
     val filePath: String? = null,
+    /** Local side-car cover ({id}.jpg next to the media file), saved during download so the
+     *  Downloads list / NowPlaying / media notification can show art fully offline. */
+    val artPath: String? = null,
 )

@@ -29,6 +29,21 @@ object FavoritesStore {
         persist()
     }
 
+    /** Idempotent add/remove — used to reconcile the local store with the YouTube ACCOUNT's like
+     *  state (toggle() would flip the wrong way when local and account already agree). No-ops skip
+     *  the disk write. */
+    fun add(url: String) {
+        if (url in _liked.value) return
+        _liked.update { it + url }
+        persist()
+    }
+
+    fun remove(url: String) {
+        if (url !in _liked.value) return
+        _liked.update { it - url }
+        persist()
+    }
+
     private fun persist() {
         runCatching { file.writeText(JSONArray(_liked.value.toList()).toString()) }
     }

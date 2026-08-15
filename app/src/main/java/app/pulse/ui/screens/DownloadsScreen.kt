@@ -1,5 +1,11 @@
 package app.pulse.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,9 +36,12 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -43,6 +52,7 @@ import app.pulse.core.StreamItem
 import app.pulse.core.secToClock
 import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
+import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.Thumb
 import app.pulse.ui.theme.Bg1
 import app.pulse.ui.theme.Bg3
@@ -176,10 +186,16 @@ private fun LocalRow(track: StreamItem, onPlay: () -> Unit) {
 @Composable
 private fun DlRow(dl: DownloadItem, onPlay: (DownloadItem) -> Unit, onRemove: (DownloadItem) -> Unit, onRetry: (DownloadItem) -> Unit) {
     val playable = dl.status == DlStatus.Completed
+    val downloading = dl.status == DlStatus.Downloading
+    // The manager reports progress in discrete ticks; a fast tween glides the bar between them.
+    val progress by animateFloatAsState(dl.progress.coerceIn(0f, 1f), AnimSpecs.fast(), label = "dlProgress")
+    val rowHeight by animateDpAsState(if (downloading) 72.dp else 64.dp, AnimSpecs.fast(), label = "dlRowHeight")
     Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bg1).clickable(enabled = playable || dl.status == DlStatus.Failed) { if (playable) onPlay(dl) else onRetry(dl) }) {
-        Row(Modifier.fillMaxWidth().height(if (dl.status == DlStatus.Downloading) 72.dp else 64.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(rowHeight).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                Thumb(dl.thumbnailUrl, Modifier.size(48.dp), 8.dp)
+                // Prefer the offline side-car cover (Coil loads plain absolute paths); the remote thumb
+                // covers in-flight downloads and records saved before side-car art existed.
+                Thumb(dl.artPath ?: dl.thumbnailUrl, Modifier.size(48.dp), 8.dp)
                 if (playable) Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
             }
             Spacer(Modifier.width(12.dp))
@@ -188,18 +204,29 @@ private fun DlRow(dl: DownloadItem, onPlay: (DownloadItem) -> Unit, onRemove: (D
                 Text("${dl.uploader} · ${dl.format.label}", color = Tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            when (dl.status) {
-                DlStatus.Downloading -> Text("${(dl.progress * 100).toInt()}%", color = Tx0, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                DlStatus.Queued -> Text("Queued", color = Tx3, fontSize = 11.sp)
-                DlStatus.Completed -> Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(Bg3), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.DownloadDone, null, tint = Tx1, modifier = Modifier.size(14.dp)) }
-                DlStatus.Failed -> Icon(Icons.Rounded.Refresh, "retry", tint = Tx1, modifier = Modifier.size(18.dp))
+            // Fade between the trailing status widgets (percent -> done tick, queued -> percent, ...).
+            Crossfade(dl.status, animationSpec = AnimSpecs.fast<Float>(), label = "dlStatus") { status ->
+                when (status) {
+                    DlStatus.Downloading -> Text("${(dl.progress * 100).toInt()}%", color = Tx0, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    DlStatus.Queued -> Text("Queued", color = Tx3, fontSize = 11.sp)
+                    DlStatus.Completed -> Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(Bg3), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.DownloadDone, null, tint = Tx1, modifier = Modifier.size(14.dp)) }
+                    DlStatus.Failed -> Icon(Icons.Rounded.Refresh, "retry", tint = Tx1, modifier = Modifier.size(18.dp))
+                }
             }
             Box(Modifier.size(36.dp).clickable { onRemove(dl) }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Close, "remove", tint = Tx3, modifier = Modifier.size(16.dp))
             }
         }
-        if (dl.status == DlStatus.Downloading) {
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(dl.progress).height(2.dp).background(Red))
+        // Fades out (instead of vanishing) when the download completes or fails. `progress` is
+        // read INSIDE drawBehind, so each glide frame only redraws — no recomposition or
+        // re-measure of the row (several bars can tick at once on a J7-class device).
+        AnimatedVisibility(
+            visible = downloading,
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+            enter = fadeIn(AnimSpecs.fast()),
+            exit = fadeOut(AnimSpecs.fast()),
+        ) {
+            Box(Modifier.fillMaxWidth().height(2.dp).drawBehind { drawRect(Red, size = Size(size.width * progress, size.height)) })
         }
     }
 }

@@ -1,5 +1,9 @@
 package app.pulse.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,7 +32,6 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,7 +42,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,9 +51,12 @@ import app.pulse.HomeState
 import app.pulse.core.HomeCard
 import app.pulse.core.HomeShelf
 import app.pulse.core.StreamItem
+import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.PlayingBars
+import app.pulse.ui.components.ShimmerHost
+import app.pulse.ui.components.SkeletonBox
+import app.pulse.ui.components.SkeletonShelf
 import app.pulse.ui.components.Thumb
-import app.pulse.ui.theme.Bg1
 import app.pulse.ui.theme.Bg3
 import app.pulse.ui.theme.OnRed
 import app.pulse.ui.theme.Red
@@ -61,6 +66,12 @@ import app.pulse.ui.theme.Tx2
 import app.pulse.ui.theme.Tx3
 
 private val CHIPS = listOf("All", "Music", "Podcasts", "Downloaded")
+
+/** Pill widths mirroring the real chip labels above ("All", "Music", "Podcasts", "Downloaded"). */
+private val SkeletonChipWidths = listOf(48.dp, 64.dp, 82.dp, 100.dp)
+
+/** Skeleton -> content swap: the leaving side just fades; the arriving side rises in. */
+private val ContentSwapExit: ExitTransition = fadeOut(AnimSpecs.fast())
 
 @Composable
 fun HomeScreen(
@@ -93,30 +104,51 @@ fun HomeScreen(
                 Icon(Icons.Rounded.Settings, "settings", tint = Tx1, modifier = Modifier.size(24.dp))
             }
         }
-        // chips
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CHIPS.forEachIndexed { i, c ->
-                Chip(c, active = i == selectedChip) { if (i == 3) onOpenDownloads() else selectedChip = i }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
 
-        Box(Modifier.fillMaxSize()) {
-            when {
-                state.loading -> CircularProgressIndicator(color = Red, modifier = Modifier.align(Alignment.TopCenter).padding(top = 40.dp))
-                state.error != null && state.shelves.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Couldn't load home.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
-                    Spacer(Modifier.size(12.dp))
-                    Text("Retry", color = OnRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Red).clickable { onRetry() }.padding(horizontal = 20.dp, vertical = 8.dp))
-                }
-                selectedChip == 2 -> Box(Modifier.align(Alignment.Center).padding(32.dp)) {
-                    Text("No podcasts yet — PULSE is all music for now.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
-                }
-                else -> {
-                    val quick = remember_quick(state.shelves)
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 150.dp)) {
-                        if (quick.isNotEmpty()) item(key = "quickpicks") { QuickPicks(quick, currentUrl, onPlay, onOpenDetail, onBrowse) }
-                        itemsIndexed(state.shelves, key = { i, _ -> "shelf_$i" }) { _, shelf -> Shelf(shelf, currentUrl, onPlay, onBrowse, onOpenDetail) }
+        // Skeletons ONLY when there is truly nothing to show. A refresh that kept stale shelves
+        // (loading == true but shelves non-empty) stays on the real content — no skeleton flash.
+        val showSkeleton = state.loading && state.shelves.isEmpty()
+        AnimatedContent(
+            targetState = showSkeleton,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = { AnimSpecs.overlayEnter togetherWith ContentSwapExit },
+            label = "homeSwap",
+        ) { skeleton ->
+            if (skeleton) {
+                HomeSkeleton(Modifier.fillMaxSize())
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    // chips
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CHIPS.forEachIndexed { i, c ->
+                            Chip(c, active = i == selectedChip) { if (i == 3) onOpenDownloads() else selectedChip = i }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+
+                    Box(Modifier.fillMaxSize()) {
+                        when {
+                            state.error != null && state.shelves.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                // Surface the ViewModel's diagnosis (offline vs genuinely empty feed) instead of a generic line.
+                                Text(state.error ?: "Couldn't load home.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
+                                Spacer(Modifier.size(12.dp))
+                                Text("Retry", color = OnRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Red).clickable { onRetry() }.padding(horizontal = 20.dp, vertical = 8.dp))
+                            }
+                            selectedChip == 2 -> Box(Modifier.align(Alignment.Center).padding(32.dp)) {
+                                Text("No podcasts yet — PULSE is all music for now.", color = Tx3, fontSize = 13.sp, textAlign = TextAlign.Center)
+                            }
+                            else -> {
+                                val quick = remember(state.shelves) { remember_quick(state.shelves) }
+                                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 150.dp)) {
+                                    // A refresh can fail while stale shelves are still on screen (e.g. the post-login reload
+                                    // hit a rate limit) — keep the content visible and offer retry in a slim banner instead
+                                    // of blanking the whole home.
+                                    state.error?.let { err -> item(key = "error_banner") { ErrorBanner(err, onRetry) } }
+                                    if (quick.isNotEmpty()) item(key = "quickpicks") { QuickPicks(quick, currentUrl, onPlay, onOpenDetail, onBrowse) }
+                                    itemsIndexed(state.shelves, key = { i, _ -> "shelf_$i" }) { _, shelf -> Shelf(shelf, currentUrl, onPlay, onBrowse, onOpenDetail) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -124,8 +156,43 @@ fun HomeScreen(
     }
 }
 
+/**
+ * First-load placeholder: chip row + three shelves, mirroring the real layout's metrics.
+ * ONE ShimmerHost for the whole screen — every SkeletonBox below only pays a draw.
+ */
+@Composable
+private fun HomeSkeleton(modifier: Modifier = Modifier) {
+    ShimmerHost(modifier) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SkeletonChipWidths.forEach { w ->
+                    SkeletonBox(Modifier.width(w).height(32.dp), RoundedCornerShape(99.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            repeat(3) {
+                SkeletonShelf(Modifier.padding(top = 24.dp))
+            }
+        }
+    }
+}
+
 private fun remember_quick(shelves: List<HomeShelf>): List<HomeCard> =
     shelves.flatMap { it.cards }.distinctBy { it.videoId ?: it.browseId ?: it.title }.take(8)
+
+/** Slim non-blocking failure notice shown ABOVE still-visible (stale) shelves after a failed refresh. */
+@Composable
+private fun ErrorBanner(message: String, onRetry: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(8.dp)).background(Bg3).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(message, color = Tx2, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Text("Retry", color = OnRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Red).clickable { onRetry() }.padding(horizontal = 14.dp, vertical = 6.dp))
+    }
+}
 
 @Composable
 private fun QuickPicks(cards: List<HomeCard>, currentUrl: String?, onPlay: (List<StreamItem>, Int) -> Unit, onOpenDetail: (String) -> Unit, onBrowse: (String) -> Unit) {

@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 
 @Immutable
 data class HomeCard(
@@ -26,6 +27,18 @@ data class HomeShelf(val title: String, val cards: List<HomeCard>)
 @Immutable
 data class BrowseResult(val title: String, val subtitle: String, val thumbnailUrl: String?, val tracks: List<StreamItem>)
 
+/** One "Moods & genres" category chip. [color] is YT's solid tile accent — an unsigned 32-bit ARGB
+ *  packed in a long (as served in solid.leftStripeColor) — or 0 when absent so the UI can fall back
+ *  to its own palette. [browseId]/[params] come from the chip's clickCommand.browseEndpoint and feed
+ *  categoryPage(); both nullable because YT occasionally serves chips without a click target. */
+@Immutable
+data class MoodCategory(
+    val name: String,
+    val color: Long,
+    val browseId: String? = null,
+    val params: String? = null,
+)
+
 /** Fetches YouTube Music's anonymous home feed via the InnerTube (youtubei) API. Call off the main thread. */
 object YtMusic {
 
@@ -36,19 +49,43 @@ object YtMusic {
 
     fun home(): List<HomeShelf> {
         // Personalized home when signed in; anonymous otherwise.
-        val root = fetch("FEmusic_home", auth = AuthStore.connected)
+        val auth = AuthStore.connected
+        val hadVisitorData = visitorData != null
+        var root = fetch("FEmusic_home", auth)
+        // One short-backoff retry on hard failure: YouTube's transient rate-limit/captcha pages are HTML
+        // (post() returns null for those) and usually clear within a moment.
+        if (root == null) { Thread.sleep(750); root = fetch("FEmusic_home", auth) }
         val shelves = ArrayList<HomeShelf>()
         collectShelves(root, shelves)
+        // Cold start: the very FIRST anonymous browse carries no visitor id, and YouTube often answers it
+        // with a parseable but empty home. That empty response still assigns responseContext.visitorData
+        // (harvested in post()), so one immediate retry WITH it returns the real feed.
+        if (!auth && shelves.isEmpty() && root != null && !hadVisitorData && visitorData != null) {
+            root = fetch("FEmusic_home", auth = false)
+            collectShelves(root, shelves)
+        }
         // Dedupe BEFORE judging sparseness — many shelves fall back to the title "More", so a raw count
         // overstates how many the user actually sees after dedup.
         var result = shelves.dedupeShelves()
-        // Only pad an ANONYMOUS, thin home with curated global feeds — never mix generic Charts / New Releases
-        // into a signed-in user's personalized home.
-        if (!AuthStore.connected && result.size < 5) {
+        // Pad ANY thin home — signed-in included — with curated global feeds: a sparse personalized feed
+        // (new account, empty history) otherwise looks broken. The curated shelves land BELOW the
+        // personalized ones (collectShelves appends in order) and dedupeShelves() drops repeats.
+        // FEmusic_moods_and_genres is deliberately absent: it renders as musicNavigationButtonRenderer
+        // category chips, which parseCard() can't turn into playable cards — it would add nothing.
+        var fallbacksTried = 0
+        var fallbacksHardFailed = 0
+        if (result.size < 5) {
             for (feed in listOf("FEmusic_new_releases", "FEmusic_charts")) {
-                runCatching { collectShelves(fetch(feed, auth = false), shelves) }
+                fallbacksTried++
+                val fb = fetch(feed, auth = false)
+                if (fb == null) fallbacksHardFailed++ else collectShelves(fb, shelves)
             }
             result = shelves.dedupeShelves()
+        }
+        // Throw ONLY on total hard failure (main feed AND every fallback unreachable/unparseable) so the
+        // ViewModel can tell "offline / rate-limited" from a parseable-but-genuinely-empty feed.
+        if (root == null && fallbacksTried > 0 && fallbacksHardFailed == fallbacksTried) {
+            throw IOException("YouTube Music unreachable — network error or rate-limited")
         }
         return result
     }
@@ -59,6 +96,10 @@ object YtMusic {
             is JSONObject -> {
                 val carousel = node.o("musicCarouselShelfRenderer") ?: node.o("musicImmersiveCarouselShelfRenderer")
                 val grid = node.o("gridRenderer")
+                // musicShelfRenderer is the LIST-style shelf some home/browse layouts use (rows of
+                // musicResponsiveListItemRenderer, which parseCard already understands) — without it those
+                // sections silently vanish from home.
+                val list = node.o("musicShelfRenderer")
                 when {
                     carousel != null -> addShelf(
                         carousel.o("header")?.o("musicCarouselShelfBasicHeaderRenderer")?.o("title")?.a("runs")?.obj(0)?.s("text"),
@@ -66,6 +107,9 @@ object YtMusic {
                     grid != null -> addShelf(
                         grid.o("header")?.o("gridHeaderRenderer")?.o("title")?.a("runs")?.obj(0)?.s("text"),
                         grid.a("items"), out)
+                    list != null -> addShelf(
+                        list.o("title")?.a("runs")?.obj(0)?.s("text"),
+                        list.a("contents"), out)
                     else -> { val keys = node.keys(); while (keys.hasNext()) collectShelves(node.opt(keys.next()), out) }
                 }
             }
@@ -95,12 +139,85 @@ object YtMusic {
             put("context", contextClient())
         }
         val tracks = ArrayList<StreamItem>()
-        collectTracks(post("search", body, auth = false), tracks)
+        val filtered = post("search", body, auth = false)
+        collectTracks(filtered, tracks)
         // Fallback: if the filtered search returned nothing (params rejected), try a plain search.
+        var plain: JSONObject? = null
         if (tracks.isEmpty()) {
-            collectTracks(post("search", JSONObject().apply { put("query", query); put("context", contextClient()) }, auth = false), tracks)
+            plain = post("search", JSONObject().apply { put("query", query); put("context", contextClient()) }, auth = false)
+            collectTracks(plain, tracks)
         }
+        // Both attempts hard-failed (offline / rate-limit HTML) — throw like the pre-null-post OkHttp
+        // IOException used to, so the search UI shows its error state instead of a misleading "no results".
+        if (filtered == null && plain == null) throw IOException("Search unreachable — network error or rate-limited")
         return tracks.distinctBy { it.url }
+    }
+
+    /** Type-ahead suggestions for the search box via music/get_search_suggestions (anonymous — the
+     *  query rides in the JSON body like search()). NEVER throws: suggestions are decoration, not
+     *  content, so any failure (offline, rate-limit HTML, shape change) just yields an empty list. */
+    fun searchSuggestions(query: String): List<String> {
+        if (query.isBlank()) return emptyList()
+        val body = JSONObject().apply {
+            put("input", query)
+            put("context", contextClient())
+        }
+        val root = post("music/get_search_suggestions", body, auth = false) ?: return emptyList()
+        val out = LinkedHashSet<String>()   // insertion order preserves YT's ranking; set dedupes for free
+        collectSuggestions(root, out)
+        return out.take(8)
+    }
+
+    private fun collectSuggestions(node: Any?, out: MutableCollection<String>) {
+        when (node) {
+            is JSONObject -> {
+                node.o("searchSuggestionRenderer")?.let { r ->
+                    // The suggestion text arrives split across runs (the typed prefix is a separate
+                    // bolded run) — join them back into the full phrase.
+                    val text = r.o("suggestion")?.a("runs").joinRuns()
+                    if (text.isNotBlank()) out.add(text)
+                }
+                val keys = node.keys()
+                while (keys.hasNext()) collectSuggestions(node.opt(keys.next()), out)
+            }
+            is JSONArray -> for (i in 0 until node.length()) collectSuggestions(node.opt(i), out)
+        }
+    }
+
+    /** The "Moods & genres" category chips (FEmusic_moods_and_genres, anonymous). These render as
+     *  musicNavigationButtonRenderer nodes — the one browse shape parseCard() deliberately ignores on
+     *  home — so they get their own walker. NEVER throws; empty list on any failure. */
+    fun moodsAndGenres(): List<MoodCategory> {
+        val root = fetch("FEmusic_moods_and_genres", auth = false) ?: return emptyList()
+        val out = ArrayList<MoodCategory>()
+        collectMoodButtons(root, out)
+        return out.distinctBy { it.name.lowercase() }
+    }
+
+    private fun collectMoodButtons(node: Any?, out: MutableList<MoodCategory>) {
+        when (node) {
+            is JSONObject -> {
+                node.o("musicNavigationButtonRenderer")?.let { r ->
+                    // solid.leftStripeColor is the tile accent YT Music itself paints; optLong's 0
+                    // default doubles as the "no color served" marker for the UI's palette fallback.
+                    val name = r.o("buttonText")?.a("runs")?.obj(0)?.s("text")
+                    if (!name.isNullOrBlank()) {
+                        // The chip's click target — browseId + params reproduce YT Music's own curated
+                        // page for this category via categoryPage(); nullable-defensive like the rest.
+                        val endpoint = r.o("clickCommand")?.o("browseEndpoint")
+                        out.add(MoodCategory(
+                            name,
+                            r.o("solid")?.optLong("leftStripeColor", 0L) ?: 0L,
+                            endpoint?.s("browseId"),
+                            endpoint?.s("params"),
+                        ))
+                    }
+                }
+                val keys = node.keys()
+                while (keys.hasNext()) collectMoodButtons(node.opt(keys.next()), out)
+            }
+            is JSONArray -> for (i in 0 until node.length()) collectMoodButtons(node.opt(i), out)
+        }
     }
 
     private fun parseCard(item: JSONObject): HomeCard? {
@@ -127,23 +244,78 @@ object YtMusic {
     /** The user's YouTube "Liked Music" playlist — needs a connected account. */
     const val LIKED_BROWSE_ID = "FEmusic_liked_videos"
 
-    /** Like / un-like a track on the user's YouTube account. Call off the main thread. */
-    fun rate(videoId: String, liked: Boolean) {
+    /** Like / un-like a track on the user's YouTube account. Call off the main thread.
+     *  Returns true only when YouTube accepted the rating: post() already guarantees a 2xx parseable
+     *  JSON (null = network error / non-2xx / rate-limit HTML), and when the response carries an
+     *  explicit run status it must be STATUS_SUCCEEDED. One short-backoff retry on failure, matching
+     *  home()'s transient-hiccup handling. */
+    fun rate(videoId: String, liked: Boolean): Boolean {
+        if (!AuthStore.connected) return false
+        val endpoint = if (liked) "like/like" else "like/removelike"
+        if (rateOnce(endpoint, videoId)) return true
+        Thread.sleep(600)
+        return rateOnce(endpoint, videoId)
+    }
+
+    private fun rateOnce(endpoint: String, videoId: String): Boolean {
         val body = JSONObject().apply {
             put("target", JSONObject().put("videoId", videoId))
             put("context", contextClient())
         }
-        post(if (liked) "like/like" else "like/removelike", body, auth = true)
+        val root = post(endpoint, body, auth = true) ?: return false
+        // Feedback-style confirmation when present ("status"/"runStatus": STATUS_SUCCEEDED); a
+        // confirmation-less 2xx JSON still counts — like/like often replies with just actions.
+        val status = root.s("status") ?: root.s("runStatus")
+        return status == null || status == "STATUS_SUCCEEDED"
     }
+
+    /** The ACCOUNT's like state for a track — "LIKE", "DISLIKE" or "INDIFFERENT" — via the
+     *  authenticated "next" endpoint (its likeButtonRenderer carries likeStatus for the requested
+     *  video). Null on ANY failure (not connected, offline, shape change) so callers treat it as
+     *  "unknown" and change nothing. Call off the main thread. */
+    fun likeStatus(videoId: String): String? {
+        if (!AuthStore.connected) return null
+        val root = post("next", JSONObject().apply {
+            put("videoId", videoId)
+            put("context", contextClient())
+        }, auth = true) ?: return null
+        return findLikeStatus(root, videoId)
+    }
+
+    /** Defensive walk for a "likeStatus" field with a known value. The queue's OTHER tracks encode
+     *  their state under likeEndpoint."status", not "likeStatus", so the first hit is the requested
+     *  video's likeButtonRenderer — but when a sibling "target" exists it must still match [videoId]. */
+    private fun findLikeStatus(node: Any?, videoId: String): String? {
+        when (node) {
+            is JSONObject -> {
+                val status = node.s("likeStatus")
+                if (status != null && (status == "LIKE" || status == "DISLIKE" || status == "INDIFFERENT")) {
+                    val target = node.o("target")?.s("videoId")
+                    if (target == null || target == videoId) return status
+                }
+                val keys = node.keys()
+                while (keys.hasNext()) findLikeStatus(node.opt(keys.next()), videoId)?.let { return it }
+            }
+            is JSONArray -> for (i in 0 until node.length()) findLikeStatus(node.opt(i), videoId)?.let { return it }
+        }
+        return null
+    }
+
+    /** Sign PRIVATE feeds when connected — the ONE auth rule shared by browse() and categoryPage().
+     *  Personal playlists use VL… ids (Liked Music = VLLM, My Supermix, Discover Mix, My Mix N) and
+     *  FEmusic_* feeds (including FEmusic_moods_and_genres_category…) need the cookie — that's what
+     *  makes a signed-in user's category pages personalized. Public albums/playlists (MPRE…, OLAK…,
+     *  MPLA…) stay anonymous so they still load if the session cookie has expired. */
+    private fun signBrowse(browseId: String): Boolean =
+        AuthStore.connected && (browseId.startsWith("VL") || browseId.startsWith("FEmusic_"))
 
     /** Fetch an album / playlist / artist page: header + all playable tracks found in the response.
      *  Private feeds (FEmusic_*, e.g. Liked Music) are signed with the session cookie. */
     fun browse(browseId: String): BrowseResult {
-        // Sign PRIVATE feeds when connected — personal playlists use VL… ids (Liked Music = VLLM, My Supermix,
-        // Discover Mix, My Mix N) and FEmusic_* feeds need the cookie. Public albums/playlists (MPRE…, OLAK…,
-        // MPLA…) stay anonymous so they still load if the session cookie has expired.
-        val needsAuth = browseId.startsWith("VL") || browseId.startsWith("FEmusic_")
-        val root = fetch(browseId, auth = AuthStore.connected && needsAuth)
+        // Hard failure throws (like the OkHttp IOException did before post() went nullable) so the caller's
+        // runCatching shows its error path rather than a hollow "Playlist" page with zero tracks.
+        val root = fetch(browseId, auth = signBrowse(browseId))
+            ?: throw IOException("browse $browseId unreachable — network error or rate-limited")
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
         val header = listOf(
@@ -233,16 +405,51 @@ object YtMusic {
         put("gl", "US")
     })
 
-    private fun fetch(browseId: String, auth: Boolean = true): JSONObject =
-        post("browse", JSONObject().apply { put("browseId", browseId); put("context", contextClient()) }, auth)
+    /** One "Moods & genres" category page: YT Music's own curated shelves for that chip, straight from
+     *  the chip's clickCommand browseId (+ params). Signed via the same signBrowse() rule as browse() —
+     *  category ids start with FEmusic_ so a connected user gets YT's PERSONALIZED picks. Reuses the
+     *  home() shelf walker, so shelves of playlists/albums/tracks land in the HomeShelf/HomeCard models.
+     *  Hard failure THROWS (matching browse()) so the category screen can show its error + Retry. */
+    fun categoryPage(browseId: String, params: String?): List<HomeShelf> {
+        val root = fetch(browseId, auth = signBrowse(browseId), params = params)
+            ?: throw IOException("category $browseId unreachable — network error or rate-limited")
+        val shelves = ArrayList<HomeShelf>()
+        collectShelves(root, shelves)
+        return shelves.dedupeShelves()
+    }
 
-    private fun post(endpoint: String, body: JSONObject, auth: Boolean = true): JSONObject {
+    private fun fetch(browseId: String, auth: Boolean = true, params: String? = null): JSONObject? =
+        post("browse", JSONObject().apply {
+            put("browseId", browseId)
+            // Category pages need the chip's opaque params token alongside the browseId — without it
+            // YT answers FEmusic_moods_and_genres_category with an empty page. Absent for every other
+            // browse, so existing callers are untouched.
+            params?.let { put("params", it) }
+            put("context", contextClient())
+        }, auth)
+
+    /** YouTube-assigned anonymous session id, captured from responseContext of ANY InnerTube response.
+     *  Anonymous browse requests that don't echo it back commonly get a thin or completely EMPTY
+     *  FEmusic_home, so we keep it for the life of the process and attach it to every anonymous call. */
+    @Volatile
+    private var visitorData: String? = null
+
+    /** POSTs to InnerTube. Returns the parsed response, or null on HARD failure — network error, non-2xx
+     *  status, or an unparseable body (YouTube serves HTML on rate-limit/captcha/consent/5xx). Callers that
+     *  must never throw treat null like an empty response; home() uses it to tell "unreachable" from "empty". */
+    private fun post(endpoint: String, body: JSONObject, auth: Boolean = true): JSONObject? {
+        // Echo the visitor id back on anonymous requests exactly like the web app does: both inside
+        // context.client and as the X-Goog-Visitor-Id header. Signed-in requests are identified by
+        // their cookie instead. Read once into a local so body and header can't disagree mid-race.
+        val vd = if (!auth) visitorData else null
+        vd?.let { body.o("context")?.o("client")?.put("visitorData", it) }
         val builder = okhttp3.Request.Builder()
             .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false")
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
+        vd?.let { builder.header("X-Goog-Visitor-Id", it) }
         // Cookie + SAPISIDHASH — the same auth the music.youtube.com web app sends. (OAuth Bearer
         // tokens stopped working for YT Music endpoints in Nov 2024.)
         if (auth) AuthStore.cookies?.let { c ->
@@ -250,10 +457,16 @@ object YtMusic {
             AuthStore.sapisidHash()?.let { builder.header("Authorization", it) }
             builder.header("X-Goog-AuthUser", "0")
         }
-        client.newCall(builder.build()).execute().use { resp ->
-            // YouTube returns HTML (not JSON) on rate-limit/captcha/5xx — never let that throw.
-            val text = resp.body?.string()?.trimStart() ?: "{}"
-            return runCatching { JSONObject(text) }.getOrDefault(JSONObject())
+        return try {
+            client.newCall(builder.build()).execute().use { resp ->
+                val text = resp.body?.string()?.trimStart() ?: return null
+                val json = runCatching { JSONObject(text) }.getOrNull() ?: return null   // HTML error page
+                // Even error responses can carry a fresh visitor id — always harvest it.
+                json.o("responseContext")?.s("visitorData")?.let { visitorData = it }
+                if (resp.isSuccessful) json else null
+            }
+        } catch (e: IOException) {
+            null   // offline / DNS / timeout — hard failure, never throw from here
         }
     }
 

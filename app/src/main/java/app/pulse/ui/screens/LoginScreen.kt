@@ -5,6 +5,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,7 +41,9 @@ private const val CHROME_UA =
 @Composable
 fun LoginScreen(onConnected: (String) -> Unit, onCancel: () -> Unit) {
     val done = remember { booleanArrayOf(false) }
-    Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
+    // Root tap consumer: the header row's dead area must not let taps fall through to whatever is
+    // behind this overlay. The WebView (an AndroidView child) handles its own touches as usual.
+    Column(Modifier.fillMaxSize().background(Bg0).pointerInput(Unit) { detectTapGestures { } }.statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clickable { onCancel() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.ArrowBackIosNew, "back", tint = Tx0, modifier = Modifier.size(20.dp))

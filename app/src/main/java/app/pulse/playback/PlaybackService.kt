@@ -2,12 +2,15 @@ package app.pulse.playback
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -105,13 +108,21 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<SessionResult> = when (customCommand.customAction) {
             CMD_STOP -> {
                 // Tell the ViewModel to reset its UI (hide the mini-player), then tear down playback + the
-                // notification. stop() BEFORE clearMediaItems() so the player goes to IDLE (not ENDED) and the
-                // ViewModel never treats the close as an end-of-track auto-advance. clearMediaItems() removes
-                // the media notification; stopSelf() covers the app-swiped-away case where no controller is bound.
+                // notification. pause() first so playWhenReady goes false and no foreground-worthiness check
+                // (Media3's shouldRunInForeground, our onTaskRemoved) can still count this session as
+                // playing. stop() BEFORE clearMediaItems() so the player goes to IDLE (not ENDED) and the
+                // ViewModel never treats the close as an end-of-track auto-advance.
                 session.broadcastCustomCommand(SessionCommand(CMD_STOP, Bundle.EMPTY), Bundle.EMPTY)
+                session.player.pause()
                 session.player.stop()
                 session.player.clearMediaItems()
-                stopSelf()
+                // Media3 1.2.1's own removal (its internal notification controller reacting to IDLE + empty
+                // timeline) is a chain of async posted updates that reliably fails to clear the bar on device
+                // — and stopSelf() below is a NO-OP while the ViewModel's app-lifetime MediaController keeps
+                // this service bound, so nothing else would ever demote us. Remove the notification
+                // deterministically, right here.
+                dismissNotification()
+                stopSelf()   // harmless while bound; real teardown for the nothing-bound case
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             else -> Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
@@ -142,12 +153,44 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
+    /**
+     * Demote from foreground AND cancel the posted notification. ServiceCompat handles the pre-N
+     * fallback (minSdk 21); the explicit cancel is belt-and-braces for the paused/"detached" state,
+     * where Media3 has already called stopForeground(DETACH) and the bar is a plain posted
+     * notification that stopForeground() alone won't remove. The id is DefaultMediaNotificationProvider's
+     * DEFAULT_NOTIFICATION_ID (1001, verified in media3-session 1.2.1) — we never install a custom
+     * provider or id, so that constant is what Media3 posts under.
+     */
+    private fun dismissNotification() {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        NotificationManagerCompat.from(this).cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
+    }
+
+    // Media3 1.2.1's MediaSessionService does NOT override onTaskRemoved (verified against the 1.2.1
+    // artifact: the base is plain Service, a no-op), so this override is the only handling. When the
+    // user swipes the APP away with playback stopped/paused (or never started), the session +
+    // notification must die with it; only an actively-playing session survives the swipe.
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = session?.player
-        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) stopSelf()
+        // "Actively playing" must be playback INTENT (mirrors the ViewModel's isPlaying): ENDED (queue
+        // finished) and IDLE (fatal error / circuit breaker) both KEEP playWhenReady=true, so checking
+        // playWhenReady alone left the service — and, in the ENDED case, its still-posted paused-style
+        // notification — alive as a zombie after the user swiped the app away.
+        val activelyPlaying = player != null && player.playWhenReady && player.mediaItemCount > 0 &&
+            player.playbackState != Player.STATE_ENDED && player.playbackState != Player.STATE_IDLE
+        if (!activelyPlaying) {
+            player?.pause()
+            player?.stop()
+            player?.clearMediaItems()
+            dismissNotification()
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
+        // If the service ever dies with the bar still posted (system stop, unbind after a Close),
+        // the notification must not outlive it.
+        dismissNotification()
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()

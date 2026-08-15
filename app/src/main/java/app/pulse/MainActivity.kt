@@ -1,8 +1,12 @@
 package app.pulse
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,9 +23,19 @@ import app.pulse.ui.theme.PulseTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    // Fire-and-forget: no rationale UI, no branching on the result — the OS remembers a denial.
+    private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // POST_NOTIFICATIONS is declared in the manifest but was never requested at runtime. On
+        // Android 13+ that leaves the media notification invisible, which degrades the playback
+        // service's foreground standing — a contributor to playback dying in the background.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         setContent {
             PulseTheme {
                 val context = LocalContext.current

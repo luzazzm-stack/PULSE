@@ -3,6 +3,7 @@ package app.pulse.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,7 +59,9 @@ fun SettingsScreen(
     onSetPreferVideo: (Boolean) -> Unit,
     onSetMax: (Int) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    // Root tap consumer: the header row's dead area (the Bg0 background lives on the wrapper in
+    // PulseRoot and is not hit-testable) would otherwise let taps reach the tab content behind.
+    Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } }.statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clickable { onBack() }, contentAlignment = Alignment.CenterStart) {
                 Icon(Icons.Rounded.ArrowBackIosNew, "back", tint = Tx0, modifier = Modifier.size(20.dp))
@@ -152,7 +156,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(5.dp))
                         Box(Modifier.padding(bottom = 4.dp).size(5.dp).clip(CircleShape).background(Red))
                     }
-                    Text("Version 0.10.5", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Version 0.12.0", color = Tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     Text("A native, ad-free player", color = Tx3, fontSize = 12.sp)
                 }
             }

@@ -70,10 +70,13 @@ object AuthStore {
         _connected.value = false
     }
 
-    /** Authorization header value for InnerTube, or null if not connected. */
+    /** Authorization header value for InnerTube, or null if not connected.
+     *  Format: "SAPISIDHASH <ts>_<sha1hex(ts + " " + SAPISID + " " + origin)>" with a SECONDS timestamp
+     *  and origin https://music.youtube.com — exactly what the web app sends. Prefers __Secure-3PAPISID
+     *  (always present on modern sessions) and falls back to SAPISID. */
     fun sapisidHash(): String? {
         val c = cookies ?: return null
-        val sapisid = cookieValue(c, "SAPISID") ?: cookieValue(c, "__Secure-3PAPISID") ?: return null
+        val sapisid = cookieValue(c, "__Secure-3PAPISID") ?: cookieValue(c, "SAPISID") ?: return null
         val time = System.currentTimeMillis() / 1000
         val origin = "https://music.youtube.com"
         val digest = sha1("$time $sapisid $origin")

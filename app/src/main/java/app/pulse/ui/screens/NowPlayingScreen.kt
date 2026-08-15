@@ -1,7 +1,14 @@
 package app.pulse.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +31,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
@@ -38,6 +46,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -49,7 +59,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,16 +73,31 @@ import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import app.pulse.core.msToClock
 import app.pulse.playback.PlayerUi
-import app.pulse.ui.components.Thumb
+import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.theme.Bg0
 import app.pulse.ui.theme.Bg1
+import app.pulse.ui.theme.Bg3
 import app.pulse.ui.theme.Line20
 import app.pulse.ui.theme.OnRed
 import app.pulse.ui.theme.Red
 import app.pulse.ui.theme.Tx0
 import app.pulse.ui.theme.Tx1
 import app.pulse.ui.theme.Tx2
+import app.pulse.ui.theme.Tx4
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+
+/** No-overshoot settle for freshly-changed artwork (0.97f -> 1f). */
+private val ArtSettleSpring: SpringSpec<Float> = spring(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+/** Slight-overshoot pop shared by the like heart, play/pause, and toggle icons. */
+private val PopSpring: SpringSpec<Float> = spring(
+    dampingRatio = Spring.DampingRatioMediumBouncy,
+    stiffness = Spring.StiffnessMedium,
+)
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -92,8 +120,53 @@ fun NowPlayingScreen(
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
 ) {
-    val item = ui.current
-    if (item == null) { Box(Modifier.fillMaxSize().background(Bg0)); return }
+    // Keep the last non-null track so the screen stays rendered through its exit animation
+    // after playback is cleared (mirrors the MiniPlayer pattern). Only the overlay's short
+    // exit window ever reads the cached value.
+    var lastItem by remember { mutableStateOf(ui.current) }
+    SideEffect { if (ui.current != null) lastItem = ui.current }
+    val item = ui.current ?: lastItem
+    // The degenerate exit-window box must still shield what's behind it — the dying overlay
+    // remains hit-testable through its slide-out, same as the full screen below.
+    if (item == null) { Box(Modifier.fillMaxSize().background(Bg0).pointerInput(Unit) { detectTapGestures { } }); return }
+
+    // ---- Motion state: one settle Animatable + a handful of single-spring/tween states. ----
+    val context = LocalContext.current
+    val artRequest = remember(item.thumbnailUrl) {
+        ImageRequest.Builder(context)
+            .data(item.thumbnailUrl)
+            .crossfade(AnimSpecs.NormalMs)
+            .build()
+    }
+    val artScale = remember { Animatable(1f) }
+    LaunchedEffect(item.thumbnailUrl) {
+        artScale.snapTo(0.97f)
+        artScale.animateTo(1f, ArtSettleSpring)
+    }
+    val likeScale = remember { Animatable(1f) }
+    var likePopArmed by remember { mutableStateOf(false) }
+    // The pop is feedback for a TAP only: a skip can also flip `liked` (liked -> unliked track),
+    // which must settle silently — likePopUrl tracks the item so a track change never pops.
+    var likePopUrl by remember { mutableStateOf(item.url) }
+    LaunchedEffect(liked, item.url) {
+        if (item.url != likePopUrl) {
+            likePopUrl = item.url // `liked` changed because the TRACK changed — no pop
+        } else if (likePopArmed) {
+            likeScale.snapTo(if (liked) 0.6f else 0.85f)
+            likeScale.animateTo(1f, PopSpring)
+        } // else: no pop for the state the screen opened with
+        likePopArmed = true
+    }
+    val playScale by animateFloatAsState(
+        targetValue = if (ui.isPlaying) 1f else 0.94f,
+        animationSpec = PopSpring,
+        label = "playScale",
+    )
+    val tintSpec = remember { AnimSpecs.fast<Color>() } // this screen recomposes each position tick; allocate the tween once
+    val shuffleTint by animateColorAsState(if (ui.shuffle) Red else Tx1, tintSpec, label = "shuffleTint")
+    val shuffleScale by animateFloatAsState(if (ui.shuffle) 1.12f else 1f, PopSpring, label = "shuffleScale")
+    val repeatTint by animateColorAsState(if (ui.repeat > 0) Red else Tx1, tintSpec, label = "repeatTint")
+    val repeatScale by animateFloatAsState(if (ui.repeat > 0) 1.12f else 1f, PopSpring, label = "repeatScale")
 
     var scrubbing by remember { mutableStateOf(false) }
     var scrubValue by remember { mutableFloatStateOf(0f) }
@@ -105,8 +178,11 @@ fun NowPlayingScreen(
     }
     val shownPos = if (scrubbing) (scrubValue * scrubDur).toLong() else ui.positionMs
 
-    Box(Modifier.fillMaxSize().background(Bg0)) {
-        AsyncImage(model = item.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize().blur(55.dp))
+    // Root tap consumer: dead areas (chrome, spacers, padding) must not let taps fall through to
+    // whatever is stacked behind this overlay. Children are hit-tested first, so every control
+    // above keeps working — the root only swallows taps nobody else claimed.
+    Box(Modifier.fillMaxSize().background(Bg0).pointerInput(Unit) { detectTapGestures { } }) {
+        AsyncImage(model = artRequest, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize().blur(55.dp))
         Box(Modifier.matchParentSize().background(Color(0xD6000000)))
 
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -131,7 +207,26 @@ fun NowPlayingScreen(
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)),
                 )
             } else {
-                Thumb(item.thumbnailUrl, Modifier.fillMaxWidth(0.82f).aspectRatio(1f), 16.dp)
+                // Inline Thumb-alike so the artwork can crossfade (250 ms) and settle in scale
+                // on track change. graphicsLayer reads artScale in the layer block only, so the
+                // spring never recomposes this subtree.
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.82f)
+                        .aspectRatio(1f)
+                        .graphicsLayer { scaleX = artScale.value; scaleY = artScale.value }
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Bg3),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.MusicNote, null, tint = Tx4, modifier = Modifier.size(20.dp))
+                    AsyncImage(
+                        model = artRequest,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
             }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.clip(RoundedCornerShape(99.dp)).background(Bg1).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -146,7 +241,8 @@ fun NowPlayingScreen(
                     Text(item.uploader, color = Tx1, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Box(Modifier.size(44.dp).clickable { onToggleLike() }, contentAlignment = Alignment.Center) {
-                    Icon(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "like", tint = if (liked) Red else Tx1, modifier = Modifier.size(26.dp))
+                    Icon(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "like", tint = if (liked) Red else Tx1,
+                        modifier = Modifier.size(26.dp).graphicsLayer { scaleX = likeScale.value; scaleY = likeScale.value })
                 }
             }
 
@@ -165,12 +261,13 @@ fun NowPlayingScreen(
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).clickable { onShuffle() }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Shuffle, "shuffle", tint = if (ui.shuffle) Red else Tx1, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Shuffle, "shuffle", tint = shuffleTint,
+                        modifier = Modifier.size(24.dp).graphicsLayer { scaleX = shuffleScale; scaleY = shuffleScale })
                 }
                 Box(Modifier.size(52.dp).clickable { onPrev() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.SkipPrevious, "previous", tint = Tx0, modifier = Modifier.size(36.dp))
                 }
-                Box(Modifier.size(72.dp).clip(CircleShape).background(Red).clickable(enabled = !ui.loading) { onPlayPause() }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(72.dp).graphicsLayer { scaleX = playScale; scaleY = playScale }.clip(CircleShape).background(Red).clickable(enabled = !ui.loading) { onPlayPause() }, contentAlignment = Alignment.Center) {
                     if (ui.loading) CircularProgressIndicator(color = OnRed, strokeWidth = 2.5.dp, modifier = Modifier.size(26.dp))
                     else Icon(if (ui.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "play/pause", tint = OnRed, modifier = Modifier.size(36.dp))
                 }
@@ -179,7 +276,8 @@ fun NowPlayingScreen(
                 }
                 Box(Modifier.size(48.dp).clickable { onRepeat() }, contentAlignment = Alignment.Center) {
                     Icon(if (ui.repeat == 2) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "repeat",
-                        tint = if (ui.repeat > 0) Red else Tx1, modifier = Modifier.size(24.dp))
+                        tint = repeatTint,
+                        modifier = Modifier.size(24.dp).graphicsLayer { scaleX = repeatScale; scaleY = repeatScale })
                 }
             }
             Spacer(Modifier.height(18.dp))
