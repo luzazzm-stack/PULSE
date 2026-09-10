@@ -314,10 +314,26 @@ object YtMusic {
     fun browse(browseId: String): BrowseResult {
         // Hard failure throws (like the OkHttp IOException did before post() went nullable) so the caller's
         // runCatching shows its error path rather than a hollow "Playlist" page with zero tracks.
-        val root = fetch(browseId, auth = signBrowse(browseId))
+        val auth = signBrowse(browseId)
+        val root = fetch(browseId, auth = auth)
             ?: throw IOException("browse $browseId unreachable — network error or rate-limited")
         val tracks = ArrayList<StreamItem>()
         collectTracks(root, tracks)
+        // Long playlists arrive 100 tracks a page (Liked Music showed exactly its first 100): follow the
+        // continuation token until the list is exhausted. Stops on a repeated token or a page that adds
+        // nothing, so a stale token can't spin, and on a network failure keeps what it has.
+        var continuation = findContinuation(root)
+        val seen = HashSet<String>()
+        var pages = 1
+        while (continuation != null && seen.add(continuation.token) && pages < MAX_BROWSE_PAGES) {
+            val page = fetchContinuation(continuation, auth) ?: break
+            pages++
+            val before = tracks.size
+            collectTracks(page, tracks)
+            if (tracks.size == before) break
+            continuation = findContinuation(page)
+        }
+        android.util.Log.i("PULSE", "browse $browseId: ${tracks.size} tracks over $pages page(s)")
         val header = listOf(
             "musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer",
             "musicImmersiveHeaderRenderer", "musicEditablePlaylistDetailHeaderRenderer",
@@ -327,6 +343,46 @@ object YtMusic {
         val subtitle = header?.o("subtitle")?.a("runs").joinRuns()
         val thumb = header?.thumbUrl() ?: tracks.firstOrNull()?.thumbnailUrl
         return BrowseResult(title, subtitle, thumb, tracks.distinctBy { it.url })
+    }
+
+    /** A playlist page's "more" token. YouTube uses two shapes: the newer continuationItemRenderer carries a
+     *  continuationCommand token sent in the request BODY; the older nextContinuationData token goes in the
+     *  URL (ctoken/continuation, type=next). */
+    private class Continuation(val token: String, val inBody: Boolean)
+
+    /** Cap on pages per browse — 100 tracks each, so 50 pages is a 5,000-song list. */
+    private const val MAX_BROWSE_PAGES = 50
+
+    /** The track shelf's continuation, if any. Searched inside the shelf first — the surrounding section list
+     *  can carry its own (unrelated) continuation; a continuation page has no shelf wrapper, so fall back to
+     *  the whole response. */
+    private fun findContinuation(root: JSONObject): Continuation? {
+        val shelf = findFirst(root, "musicPlaylistShelfRenderer") ?: findFirst(root, "musicShelfRenderer")
+            ?: findFirst(root, "musicPlaylistShelfContinuation") ?: findFirst(root, "musicShelfContinuation")
+        return findContinuationIn(shelf) ?: findContinuationIn(root)
+    }
+
+    private fun findContinuationIn(node: Any?): Continuation? {
+        when (node) {
+            is JSONObject -> {
+                node.o("continuationCommand")?.s("token")?.let { return Continuation(it, inBody = true) }
+                node.o("nextContinuationData")?.s("continuation")?.let { return Continuation(it, inBody = false) }
+                val keys = node.keys()
+                while (keys.hasNext()) findContinuationIn(node.opt(keys.next()))?.let { return it }
+            }
+            is JSONArray -> for (i in 0 until node.length()) findContinuationIn(node.opt(i))?.let { return it }
+        }
+        return null
+    }
+
+    private fun fetchContinuation(c: Continuation, auth: Boolean): JSONObject? {
+        val body = JSONObject().put("context", contextClient())
+        return if (c.inBody) {
+            post("browse", body.put("continuation", c.token), auth)
+        } else {
+            val t = java.net.URLEncoder.encode(c.token, "UTF-8")
+            post("browse", body, auth, query = "ctoken=$t&continuation=$t&type=next")
+        }
     }
 
     private fun collectTracks(node: Any?, out: MutableList<StreamItem>) {
@@ -437,14 +493,14 @@ object YtMusic {
     /** POSTs to InnerTube. Returns the parsed response, or null on HARD failure — network error, non-2xx
      *  status, or an unparseable body (YouTube serves HTML on rate-limit/captcha/consent/5xx). Callers that
      *  must never throw treat null like an empty response; home() uses it to tell "unreachable" from "empty". */
-    private fun post(endpoint: String, body: JSONObject, auth: Boolean = true): JSONObject? {
+    private fun post(endpoint: String, body: JSONObject, auth: Boolean = true, query: String? = null): JSONObject? {
         // Echo the visitor id back on anonymous requests exactly like the web app does: both inside
         // context.client and as the X-Goog-Visitor-Id header. Signed-in requests are identified by
         // their cookie instead. Read once into a local so body and header can't disagree mid-race.
         val vd = if (!auth) visitorData else null
         vd?.let { body.o("context")?.o("client")?.put("visitorData", it) }
         val builder = okhttp3.Request.Builder()
-            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false")
+            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$KEY&prettyPrint=false" + (query?.let { "&$it" } ?: ""))
             .post(body.toString().toRequestBody(JSON))
             .header("User-Agent", NewPipeDownloader.USER_AGENT)
             .header("Origin", "https://music.youtube.com")
