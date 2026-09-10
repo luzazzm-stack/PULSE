@@ -49,7 +49,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,6 +154,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val likedSet by FavoritesStore.liked.collectAsStateWithLifecycle()
     val localTracks by localVm.tracks.collectAsStateWithLifecycle()
     val localScanning by localVm.scanning.collectAsStateWithLifecycle()
+    val localScanned by localVm.scanned.collectAsStateWithLifecycle()
     val onWifi by DownloadManager.onWifi.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -319,9 +322,15 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     }
 
     val play = remember(playerVm) { { list: List<StreamItem>, i: Int -> playerVm.playList(list, i) } }
-    val playLocal = remember(playerVm) {
-        { dl: DownloadItem ->
-            dl.toPlayable()?.let { playerVm.playLocalFile(it.title, it.uploader, it.thumbnailUrl, it.url) }
+    // A tapped download plays with the rest of the completed list queued behind it — the same as on-device songs.
+    // A one-song queue (the old playLocalFile) left Next, Previous and the shuffle toggle with nothing to do.
+    val playDownloads = remember(playerVm) {
+        { list: List<DownloadItem>, i: Int ->
+            val start = list.getOrNull(i)?.toPlayable()
+            if (start != null) {
+                val queue = list.mapNotNull { it.toPlayable() }
+                playerVm.playList(queue, queue.indexOfFirst { it.url == start.url }.coerceAtLeast(0), "Downloads")
+            }
             Unit
         }
     }
@@ -483,7 +492,9 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onMore = { t -> overflowTrack = t; showOverflow = true },
                 )
                 PulseTab.Library -> LibraryScreen(
-                    downloads, playlists, onPlay = playLocal,
+                    downloads, playlists,
+                    // Library lists the completed downloads too: same queue rule as the Downloads tab.
+                    onPlay = { dl -> val done = downloads.filter { it.status == DlStatus.Completed }; playDownloads(done, done.indexOf(dl)) },
                     onPlayPlaylist = { list -> play(list, 0) },
                     onOpenDownloads = { tab = PulseTab.Downloads },
                     connected = connected,
@@ -497,13 +508,31 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onRequestPermission = { audioPermLauncher.launch(AUDIO_PERMISSION) },
                     onRescanLocal = { localVm.scan(force = true) },
                     onPlayLocal = { list, i -> playerVm.playList(list, i, "On this device") },
-                    onPlay = playLocal, onRemove = removeDl,
+                    onPlay = playDownloads, onRemove = removeDl,
                     onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
                     onBrowse = { tab = PulseTab.Home },
                     onOpenSettings = { showSettings = true },
                     waitingForWifi = settings.wifiOnly && !onWifi,
                     // Downloaded + on-device songs as ONE shuffled queue.
-                    onShuffle = { dls, locals -> playerVm.shuffleAll(dls.mapNotNull { it.toPlayable() } + locals, "Downloads") },
+                    onShuffle = { dls, locals ->
+                        val downloaded = dls.mapNotNull { it.toPlayable() }
+                        android.util.Log.i("PULSE", "shuffle: ${downloaded.size} downloads + ${locals.size} on-device (scanned=$localScanned, scanning=$localScanning, hasAudio=$hasAudio)")
+                        if (!localScanned) {
+                            // Right after a cold start the device scan may not have finished — or started — when
+                            // Shuffle is tapped, and a queue built now would be downloads only. Make sure it runs,
+                            // wait for it (bounded), then merge its result.
+                            Toast.makeText(context, "Adding your device's music…", Toast.LENGTH_SHORT).show()
+                            scope.launch {
+                                localVm.scan()
+                                withTimeoutOrNull(15_000) { localVm.scanned.first { it } }
+                                val device = localVm.tracks.value.filterNot { mediaRowId(it.url) in seenOwnRowIds }
+                                android.util.Log.i("PULSE", "shuffle after scan: ${downloaded.size} downloads + ${device.size} on-device")
+                                playerVm.shuffleAll(downloaded + device, "Downloads")
+                            }
+                        } else {
+                            playerVm.shuffleAll(downloaded + locals, "Downloads")
+                        }
+                    },
                 )
                 }
             }

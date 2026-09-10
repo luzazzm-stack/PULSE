@@ -87,7 +87,8 @@ fun DownloadsScreen(
     onRequestPermission: () -> Unit,
     onRescanLocal: () -> Unit,
     onPlayLocal: (List<StreamItem>, Int) -> Unit,
-    onPlay: (DownloadItem) -> Unit,
+    /** The completed downloads shown + the index tapped: the whole list becomes the queue, like on-device songs. */
+    onPlay: (List<DownloadItem>, Int) -> Unit,
     onRemove: (DownloadItem) -> Unit,
     onRetry: (DownloadItem) -> Unit,
     onBrowse: () -> Unit,
@@ -110,6 +111,9 @@ fun DownloadsScreen(
     val failed = shown.filter { it.status == DlStatus.Failed }
     val shuffleCount = completed.size + shownLocal.size
     val focusManager = LocalFocusManager.current
+    // Only Completed rows are tappable-to-play; the tapped song plays with the rest of the completed list queued
+    // behind it, so Next / Previous / shuffle have somewhere to go (a one-song queue made them silent no-ops).
+    val playCompleted: (DownloadItem) -> Unit = { dl -> val i = completed.indexOf(dl); if (i >= 0) onPlay(completed, i) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -145,10 +149,10 @@ fun DownloadsScreen(
             }
             when {
                 shown.isNotEmpty() -> {
-                    section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, onPlay, onRemove, onRetry) }
-                    section("QUEUED (${queued.size})", queued) { DlRow(it, onPlay, onRemove, onRetry) }
-                    section("COMPLETED (${completed.size})", completed) { DlRow(it, onPlay, onRemove, onRetry) }
-                    section("FAILED (${failed.size})", failed) { DlRow(it, onPlay, onRemove, onRetry) }
+                    section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, playCompleted, onRemove, onRetry) }
+                    section("QUEUED (${queued.size})", queued) { DlRow(it, playCompleted, onRemove, onRetry) }
+                    section("COMPLETED (${completed.size})", completed) { DlRow(it, playCompleted, onRemove, onRetry) }
+                    section("FAILED (${failed.size})", failed) { DlRow(it, playCompleted, onRemove, onRetry) }
                 }
                 items.isEmpty() -> item { NoDownloadsHint(onBrowse) }
                 else -> item { DeviceHint("No downloads match \"$q\".") }

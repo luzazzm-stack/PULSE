@@ -228,37 +228,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         playList(list, Random.nextInt(list.size), source)
     }
 
-    /** Play a locally-downloaded file directly (no extractor resolution). */
-    fun playLocalFile(title: String, uploader: String, thumbnailUrl: String?, filePath: String) {
-        val c = controller ?: run {
-            // Controller still connecting (cold start): park the request instead of dropping the tap.
-            pendingOnConnect = { playLocalFile(title, uploader, thumbnailUrl, filePath) }
-            return
-        }
-        // Same reset playList() does: a stale flag left over from clearAll() (the service stop()s before
-        // clearMediaItems(), so no ENDED ever consumed it) would swallow this playback's first STATE_ENDED
-        // — e.g. repeat-one of a downloaded track failing to loop the first time.
-        suppressAutoAdvance = false
-        retriedCurrentAfterError = false
-        consecutiveFailures = 0   // fresh playback context — see the matching reset in playList()
-        invalidatePrefetch()
-        val item = StreamItem(url = filePath, title = title, uploader = uploader, durationSec = 0, thumbnailUrl = thumbnailUrl)
-        items = listOf(item)
-        index = 0
-        startCycle()
-        _ui.update { it.copy(items = items, index = 0, hasCurrent = true, loading = false, error = null) }
-        val mi = MediaItem.Builder()
-            // Published downloads are MediaStore content:// uris; older/pre-Q ones are plain paths.
-            .setUri(if (filePath.startsWith("content://")) Uri.parse(filePath) else Uri.fromFile(File(filePath)))
-            .setMediaMetadata(
-                MediaMetadata.Builder().setTitle(title).setArtist(uploader).setArtworkUri(thumbnailUrl?.let { Uri.parse(it) }).build()
-            )
-            .build()
-        c.setMediaItem(mi)
-        c.prepare()
-        c.play()
-    }
-
     fun addToQueue(item: StreamItem) {
         if (items.isEmpty()) { playOne(item); return }
         items = items + item
@@ -305,6 +274,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Step forward through the play order, honoring shuffle + repeat. auto=true means the track ended on its own. */
     private fun advance(auto: Boolean) {
+        Log.i("PULSE", "advance(auto=$auto): orderPos=$orderPos/${order.lastIndex} items=${items.size} shuffle=$shuffle repeat=$repeat")
         if (items.isEmpty()) return
         // On a USER skip, silence the outgoing track the instant of the tap: letting it keep playing
         // under the loading state made every skip feel broken ("I pressed next and the old song kept
