@@ -84,6 +84,7 @@ import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
 import app.pulse.download.DownloadManager
 import app.pulse.download.PublicStore
+import app.pulse.download.toPlayable
 import app.pulse.playback.PlayerViewModel
 import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.AnimatedOverlay
@@ -120,17 +121,6 @@ private fun mediaRowId(s: String): Long? {
     val uri = Uri.parse(s)
     if (uri.authority != MediaStore.AUTHORITY) return null   // another provider's document id is not a MediaStore row
     return runCatching { ContentUris.parseId(uri) }.getOrNull()?.takeIf { it >= 0 }
-}
-
-/**
- * A completed download as a queue item: its file (content:// or path) plays directly. The downloaded side-car
- * cover goes in as a file:// uri — Coil (mini-player/NowPlaying) and Media3's notification bitmap loader both
- * read it, so art shows fully offline.
- */
-private fun DownloadItem.toPlayable(): StreamItem? {
-    val location = filePath ?: return null
-    val art = artPath?.let { java.io.File(it) }?.takeIf { it.exists() }?.let { Uri.fromFile(it).toString() } ?: thumbnailUrl
-    return StreamItem(url = location, title = title, uploader = uploader, durationSec = 0, thumbnailUrl = art)
 }
 
 /** A picked folder's readable name — "Music/Songs", "Phone storage", "SD card/Music" — from its tree document id. */
@@ -322,18 +312,11 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     }
 
     val play = remember(playerVm) { { list: List<StreamItem>, i: Int -> playerVm.playList(list, i) } }
-    // A tapped download plays with the rest of the completed list queued behind it — the same as on-device songs.
-    // A one-song queue (the old playLocalFile) left Next, Previous and the shuffle toggle with nothing to do.
-    val playDownloads = remember(playerVm) {
-        { list: List<DownloadItem>, i: Int ->
-            val start = list.getOrNull(i)?.toPlayable()
-            if (start != null) {
-                val queue = list.mapNotNull { it.toPlayable() }
-                playerVm.playList(queue, queue.indexOfFirst { it.url == start.url }.coerceAtLeast(0), "Downloads")
-            }
-            Unit
-        }
-    }
+    // Downloaded and on-device music play as ONE library: a tap anywhere queues the completed downloads and then
+    // the on-device songs, starting at the tapped one, so Next / Previous / shuffle reach both. (A one-song queue —
+    // the old playLocalFile — left them with nothing to do.) The Downloads page builds its own queue from the
+    // lists it shows; the Library tab's downloads use the full device list.
+    val playYourMusic = remember(playerVm) { { queue: List<StreamItem>, i: Int -> playerVm.playList(queue, i, "Your music") } }
     val removeDl = remember { { dl: DownloadItem -> DownloadManager.remove(dl) } }
 
     val startConnect: () -> Unit = { showLogin = true }
@@ -493,8 +476,11 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 )
                 PulseTab.Library -> LibraryScreen(
                     downloads, playlists,
-                    // Library lists the completed downloads too: same queue rule as the Downloads tab.
-                    onPlay = { dl -> val done = downloads.filter { it.status == DlStatus.Completed }; playDownloads(done, done.indexOf(dl)) },
+                    // Library lists the completed downloads too: same one-library queue as the Downloads tab.
+                    onPlay = { dl ->
+                        val queue = downloads.filter { it.status == DlStatus.Completed }.mapNotNull { it.toPlayable() } + deviceTracks
+                        playYourMusic(queue, queue.indexOfFirst { it.url == dl.filePath }.coerceAtLeast(0))
+                    },
                     onPlayPlaylist = { list -> play(list, 0) },
                     onOpenDownloads = { tab = PulseTab.Downloads },
                     connected = connected,
@@ -507,8 +493,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     scanningLocal = localScanning,
                     onRequestPermission = { audioPermLauncher.launch(AUDIO_PERMISSION) },
                     onRescanLocal = { localVm.scan(force = true) },
-                    onPlayLocal = { list, i -> playerVm.playList(list, i, "On this device") },
-                    onPlay = playDownloads, onRemove = removeDl,
+                    onPlay = playYourMusic, onRemove = removeDl,
                     onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
                     onBrowse = { tab = PulseTab.Home },
                     onOpenSettings = { showSettings = true },

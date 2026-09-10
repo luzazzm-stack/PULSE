@@ -64,6 +64,7 @@ import app.pulse.core.StreamItem
 import app.pulse.core.secToClock
 import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
+import app.pulse.download.toPlayable
 import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.Thumb
 import app.pulse.ui.theme.Bg1
@@ -86,9 +87,10 @@ fun DownloadsScreen(
     scanningLocal: Boolean,
     onRequestPermission: () -> Unit,
     onRescanLocal: () -> Unit,
-    onPlayLocal: (List<StreamItem>, Int) -> Unit,
-    /** The completed downloads shown + the index tapped: the whole list becomes the queue, like on-device songs. */
-    onPlay: (List<DownloadItem>, Int) -> Unit,
+    /** The tapped song's queue — the completed downloads shown, then the on-device songs shown — and the tapped
+     *  song's index in it. Downloaded and on-device music play as one library, so Next / Previous / shuffle
+     *  reach both from either section. */
+    onPlay: (List<StreamItem>, Int) -> Unit,
     onRemove: (DownloadItem) -> Unit,
     onRetry: (DownloadItem) -> Unit,
     onBrowse: () -> Unit,
@@ -111,9 +113,11 @@ fun DownloadsScreen(
     val failed = shown.filter { it.status == DlStatus.Failed }
     val shuffleCount = completed.size + shownLocal.size
     val focusManager = LocalFocusManager.current
-    // Only Completed rows are tappable-to-play; the tapped song plays with the rest of the completed list queued
-    // behind it, so Next / Previous / shuffle have somewhere to go (a one-song queue made them silent no-ops).
-    val playCompleted: (DownloadItem) -> Unit = { dl -> val i = completed.indexOf(dl); if (i >= 0) onPlay(completed, i) }
+    // One queue for the whole page: completed downloads first, then the on-device songs. Only Completed rows are
+    // tappable-to-play; a download is found in the queue by its file (toPlayable keeps it as the url).
+    val downloadedQueue = remember(completed) { completed.mapNotNull { it.toPlayable() } }
+    val queue = remember(downloadedQueue, shownLocal) { downloadedQueue + shownLocal }
+    val playCompleted: (DownloadItem) -> Unit = { dl -> val i = queue.indexOfFirst { it.url == dl.filePath }; if (i >= 0) onPlay(queue, i) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -173,7 +177,7 @@ fun DownloadsScreen(
                 localTracks.isEmpty() -> item { DeviceHint("No music files found on this device.") }
                 shownLocal.isEmpty() -> item { DeviceHint("Nothing on this device matches \"$q\".") }
                 else -> items(shownLocal.size, key = { "local_${shownLocal[it].url}" }) { i ->
-                    LocalRow(shownLocal[i]) { onPlayLocal(shownLocal, i) }
+                    LocalRow(shownLocal[i]) { onPlay(queue, downloadedQueue.size + i) }
                 }
             }
         }
