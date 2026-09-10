@@ -20,6 +20,7 @@ data class StreamData(
     val thumbnailUrl: String?,
     val audioUrl: String?,   // best progressive audio (for playback / M4A download)
     val videoUrl: String?,   // best progressive muxed MP4 (for max-quality video download)
+    val m4aUrl: String? = null,   // best AAC-in-MP4 audio (M4A download; audioUrl is often WebM/Opus)
 )
 
 fun Long.secToClock(): String {

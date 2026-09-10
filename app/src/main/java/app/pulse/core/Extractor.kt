@@ -30,8 +30,10 @@ object Extractor {
 
     fun streamInfo(url: String): StreamData {
         val info = StreamInfo.getInfo(yt, url)
-        val audioUrl = info.audioStreams
-            .filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        val progressiveAudio = info.audioStreams.filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        val audioUrl = progressiveAudio.maxByOrNull { it.averageBitrate }?.content
+        val m4aUrl = progressiveAudio
+            .filter { it.format == org.schabi.newpipe.extractor.MediaFormat.M4A }
             .maxByOrNull { it.averageBitrate }
             ?.content
         val videoUrl = info.videoStreams
@@ -46,6 +48,7 @@ object Extractor {
             thumbnailUrl = info.thumbnails.bestUrl(),
             audioUrl = audioUrl,
             videoUrl = videoUrl,
+            m4aUrl = m4aUrl,
         )
     }
 

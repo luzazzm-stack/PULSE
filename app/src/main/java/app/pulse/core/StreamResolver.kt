@@ -95,13 +95,16 @@ object StreamResolver {
         // Best direct audio stream. No URL field means ciphered — this client shouldn't produce those,
         // but if it does, bail to NewPipe rather than guess.
         var audioUrl: String? = null; var audioScore = -1
+        var m4aUrl: String? = null; var m4aScore = -1
         val adaptive = streaming.optJSONArray("adaptiveFormats")
         for (i in 0 until (adaptive?.length() ?: 0)) {
             val f = adaptive!!.optJSONObject(i) ?: continue
-            if (!f.optString("mimeType").startsWith("audio/")) continue
+            val mimeType = f.optString("mimeType")
+            if (!mimeType.startsWith("audio/")) continue
             val u = f.optString("url"); if (u.isBlank()) continue
             val score = f.optInt("averageBitrate", f.optInt("bitrate", 0))
             if (score > audioScore) { audioScore = score; audioUrl = u }
+            if (mimeType.startsWith("audio/mp4") && score > m4aScore) { m4aScore = score; m4aUrl = u }
         }
         // Playback (and every download format) needs audio; a fast answer without it is no answer.
         if (audioUrl == null) return null
@@ -127,6 +130,7 @@ object StreamResolver {
             thumbnailUrl = thumb,
             audioUrl = audioUrl,
             videoUrl = videoUrl,
+            m4aUrl = m4aUrl,
         )
     }.getOrNull()
 

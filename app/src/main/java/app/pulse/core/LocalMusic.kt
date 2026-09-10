@@ -23,18 +23,22 @@ fun hasAudioPermission(context: Context): Boolean =
  * Scans the device's media library (MediaStore) for music the user already has stored locally —
  * including songs downloaded by OTHER apps into Music/, Download/, etc. Returns [StreamItem]s whose
  * `url` is a playable content:// uri; PlayerViewModel.resolveAndPlay plays those directly (no network).
+ * Rows whose file path is in [excludePaths] are skipped — Emma's own downloads saved as plain files or into a
+ * folder picked in Settings, which the Downloads list already shows (MediaStore-published ones PulseRoot hides by id).
  * Returns an empty list if the read permission isn't granted. Runs on IO.
  */
-suspend fun scanLocalAudio(context: Context): List<StreamItem> = withContext(Dispatchers.IO) {
+@Suppress("DEPRECATION")   // MediaStore DATA: deprecated on 10+ but still readable — the one way to match a row to a path
+suspend fun scanLocalAudio(context: Context, excludePaths: Set<String> = emptySet()): List<StreamItem> = withContext(Dispatchers.IO) {
     if (!hasAudioPermission(context)) return@withContext emptyList()
     val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+    val byPath = excludePaths.isNotEmpty()
     val projection = arrayOf(
         MediaStore.Audio.Media._ID,
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.DURATION,
         MediaStore.Audio.Media.ALBUM_ID,
-    )
+    ) + (if (byPath) arrayOf(MediaStore.Audio.Media.DATA) else emptyArray<String>())
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.SIZE} > 0"
     val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
     val albumArtBase = Uri.parse("content://media/external/audio/albumart")
@@ -46,7 +50,9 @@ suspend fun scanLocalAudio(context: Context): List<StreamItem> = withContext(Dis
             val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val durCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)      // API 29 col; -1 on odd ROMs
             val albumIdCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+            val dataCol = if (byPath) cursor.getColumnIndex(MediaStore.Audio.Media.DATA) else -1
             while (cursor.moveToNext()) {
+                if (dataCol >= 0 && cursor.getString(dataCol) in excludePaths) continue
                 val id = cursor.getLong(idCol)
                 val contentUri = ContentUris.withAppendedId(collection, id)
                 val rawArtist = cursor.getString(artistCol)

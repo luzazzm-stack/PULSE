@@ -9,7 +9,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,8 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
@@ -32,18 +33,29 @@ import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,8 +67,10 @@ import app.pulse.download.DownloadItem
 import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.Thumb
 import app.pulse.ui.theme.Bg1
+import app.pulse.ui.theme.Bg2
 import app.pulse.ui.theme.Bg3
 import app.pulse.ui.theme.Line08
+import app.pulse.ui.theme.Line12
 import app.pulse.ui.theme.OnRed
 import app.pulse.ui.theme.Red
 import app.pulse.ui.theme.Tx0
@@ -72,25 +86,52 @@ fun DownloadsScreen(
     scanningLocal: Boolean,
     onRequestPermission: () -> Unit,
     onRescanLocal: () -> Unit,
-    onPlayLocal: (Int) -> Unit,
+    onPlayLocal: (List<StreamItem>, Int) -> Unit,
     onPlay: (DownloadItem) -> Unit,
     onRemove: (DownloadItem) -> Unit,
     onRetry: (DownloadItem) -> Unit,
     onBrowse: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onShuffle: (List<DownloadItem>, List<StreamItem>) -> Unit,
+    waitingForWifi: Boolean = false,
 ) {
-    val downloading = items.filter { it.status == DlStatus.Downloading }
-    val queued = items.filter { it.status == DlStatus.Queued }
-    val completed = items.filter { it.status == DlStatus.Completed }
-    val failed = items.filter { it.status == DlStatus.Failed }
+    var query by rememberSaveable { mutableStateOf("") }
+    val q = query.trim()
+    // Search filters both halves of the page: what Emma downloaded and what was already on the device.
+    val shown = remember(items, q) {
+        if (q.isEmpty()) items else items.filter { it.title.contains(q, ignoreCase = true) || it.uploader.contains(q, ignoreCase = true) }
+    }
+    val shownLocal = remember(localTracks, q) {
+        if (q.isEmpty()) localTracks else localTracks.filter { it.title.contains(q, ignoreCase = true) || it.uploader.contains(q, ignoreCase = true) }
+    }
+    val downloading = shown.filter { it.status == DlStatus.Downloading }
+    val queued = shown.filter { it.status == DlStatus.Queued }
+    val completed = shown.filter { it.status == DlStatus.Completed }
+    val failed = shown.filter { it.status == DlStatus.Failed }
+    val shuffleCount = completed.size + shownLocal.size
+    val focusManager = LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Text("Downloads", color = Tx0, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 10.dp))
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Downloads", color = Tx0, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(99.dp)).clickable { onOpenSettings() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Settings, "settings", tint = Tx1, modifier = Modifier.size(24.dp))
+            }
+        }
 
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 150.dp)) {
-            if (items.isNotEmpty()) {
+        // Search, and — top right, under the settings gear — shuffle-play of everything shown: downloaded and
+        // on-device songs merged into one queue.
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            SearchField(query, onQuery = { query = it }, onDone = { focusManager.clearFocus() }, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            ShufflePlay(enabled = shuffleCount > 0) { onShuffle(completed, shownLocal) }
+        }
+
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 150.dp)) {
+            if (q.isEmpty() && items.isNotEmpty()) {
                 item {
                     Row(
-                        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bg1).border(1.dp, Line08, RoundedCornerShape(12.dp)).padding(14.dp),
+                        Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bg1).border(1.dp, Line08, RoundedCornerShape(12.dp)).padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.Rounded.Download, null, tint = Tx1, modifier = Modifier.size(18.dp))
@@ -98,18 +139,25 @@ fun DownloadsScreen(
                         Text("${completed.size} downloaded · ${downloading.size + queued.size} in queue", color = Tx0, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
-                section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, onPlay, onRemove, onRetry) }
-                section("QUEUED (${queued.size})", queued) { DlRow(it, onPlay, onRemove, onRetry) }
-                section("COMPLETED (${completed.size})", completed) { DlRow(it, onPlay, onRemove, onRetry) }
-                section("FAILED (${failed.size})", failed) { DlRow(it, onPlay, onRemove, onRetry) }
-            } else {
-                item { NoDownloadsHint(onBrowse) }
+            }
+            if (waitingForWifi && queued.isNotEmpty()) {
+                item { DeviceHint("Waiting for Wi-Fi — queued downloads start once you're on Wi-Fi. Turn off \"Download over Wi-Fi only\" in Settings to use mobile data.") }
+            }
+            when {
+                shown.isNotEmpty() -> {
+                    section("DOWNLOADING (${downloading.size})", downloading) { DlRow(it, onPlay, onRemove, onRetry) }
+                    section("QUEUED (${queued.size})", queued) { DlRow(it, onPlay, onRemove, onRetry) }
+                    section("COMPLETED (${completed.size})", completed) { DlRow(it, onPlay, onRemove, onRetry) }
+                    section("FAILED (${failed.size})", failed) { DlRow(it, onPlay, onRemove, onRetry) }
+                }
+                items.isEmpty() -> item { NoDownloadsHint(onBrowse) }
+                else -> item { DeviceHint("No downloads match \"$q\".") }
             }
 
             // ── On this device ──────────────────────────────────────────────
             item {
                 DeviceHeader(
-                    count = if (hasAudioPermission) localTracks.size else null,
+                    count = if (hasAudioPermission) shownLocal.size else null,
                     scanning = scanningLocal,
                     action = if (hasAudioPermission) "Rescan" else "Allow access",
                     onAction = { if (hasAudioPermission) onRescanLocal() else onRequestPermission() },
@@ -119,11 +167,51 @@ fun DownloadsScreen(
                 !hasAudioPermission -> item { DeviceHint("Let Emma read your device library to find music you already downloaded elsewhere.") }
                 scanningLocal && localTracks.isEmpty() -> item { DeviceHint("Scanning your device…") }
                 localTracks.isEmpty() -> item { DeviceHint("No music files found on this device.") }
-                else -> items(localTracks.size, key = { "local_${localTracks[it].url}" }) { i ->
-                    LocalRow(localTracks[i]) { onPlayLocal(i) }
+                shownLocal.isEmpty() -> item { DeviceHint("Nothing on this device matches \"$q\".") }
+                else -> items(shownLocal.size, key = { "local_${shownLocal[it].url}" }) { i ->
+                    LocalRow(shownLocal[i]) { onPlayLocal(shownLocal, i) }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchField(query: String, onQuery: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(Bg2).border(1.dp, Line12, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Search, null, tint = Tx2, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) Text("Search your music", color = Tx3, fontSize = 15.sp)
+            BasicTextField(
+                value = query, onValueChange = onQuery, singleLine = true,
+                textStyle = TextStyle(color = Tx0, fontSize = 15.sp), cursorBrush = SolidColor(Red),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onDone() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (query.isNotEmpty()) {
+            Box(Modifier.size(30.dp).clickable { onQuery("") }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Close, "clear", tint = Tx2, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/** One tap: every playable song on the page — downloaded and on-device merged — shuffled into one queue and playing. */
+@Composable
+private fun ShufflePlay(enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.height(44.dp).clip(RoundedCornerShape(99.dp)).background(if (enabled) Red else Bg3).clickable(enabled = enabled) { onClick() }.padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Shuffle, "shuffle and play", tint = if (enabled) OnRed else Tx3, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Shuffle", color = if (enabled) OnRed else Tx3, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 

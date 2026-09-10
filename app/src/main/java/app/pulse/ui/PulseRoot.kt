@@ -1,7 +1,15 @@
 package app.pulse.ui
 
+import android.Manifest
+import android.content.ContentUris
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,12 +74,14 @@ import app.pulse.core.MoodCategory
 import app.pulse.core.hasAudioPermission
 import app.pulse.core.FavoritesStore
 import app.pulse.core.PlaylistStore
+import app.pulse.core.StoragePromptStore
 import app.pulse.core.StreamItem
 import app.pulse.core.YtMusic
 import app.pulse.download.DlFormat
 import app.pulse.download.DlStatus
 import app.pulse.download.DownloadItem
 import app.pulse.download.DownloadManager
+import app.pulse.download.PublicStore
 import app.pulse.playback.PlayerViewModel
 import app.pulse.ui.components.AnimSpecs
 import app.pulse.ui.components.AnimatedOverlay
@@ -102,6 +112,34 @@ import app.pulse.ui.theme.Tx2
 private const val DETAIL_LAYER = "detail"
 private const val CATEGORY_LAYER = "category"
 
+/** MediaStore row id of a content:// uri (the same id in the Downloads and Audio views), or null for anything else. */
+private fun mediaRowId(s: String): Long? {
+    if (!s.startsWith("content://")) return null
+    val uri = Uri.parse(s)
+    if (uri.authority != MediaStore.AUTHORITY) return null   // another provider's document id is not a MediaStore row
+    return runCatching { ContentUris.parseId(uri) }.getOrNull()?.takeIf { it >= 0 }
+}
+
+/**
+ * A completed download as a queue item: its file (content:// or path) plays directly. The downloaded side-car
+ * cover goes in as a file:// uri — Coil (mini-player/NowPlaying) and Media3's notification bitmap loader both
+ * read it, so art shows fully offline.
+ */
+private fun DownloadItem.toPlayable(): StreamItem? {
+    val location = filePath ?: return null
+    val art = artPath?.let { java.io.File(it) }?.takeIf { it.exists() }?.let { Uri.fromFile(it).toString() } ?: thumbnailUrl
+    return StreamItem(url = location, title = title, uploader = uploader, durationSec = 0, thumbnailUrl = art)
+}
+
+/** A picked folder's readable name — "Music/Songs", "Phone storage", "SD card/Music" — from its tree document id. */
+private fun folderLabel(tree: Uri): String {
+    val id = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return tree.toString()
+    if (tree.authority != "com.android.externalstorage.documents") return id
+    val path = id.substringAfter(':', "")
+    return if (id.substringBefore(':') == "primary") path.ifEmpty { "Phone storage" }
+    else "SD card" + (if (path.isEmpty()) "" else "/$path")
+}
+
 @Composable
 fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: PlayerViewModel, settingsVm: SettingsViewModel, localVm: LocalMusicViewModel) {
     val homeState by homeVm.state.collectAsStateWithLifecycle()
@@ -114,14 +152,35 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val likedSet by FavoritesStore.liked.collectAsStateWithLifecycle()
     val localTracks by localVm.tracks.collectAsStateWithLifecycle()
     val localScanning by localVm.scanning.collectAsStateWithLifecycle()
+    val onWifi by DownloadManager.onWifi.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Below Android 10, publishing to shared storage needs WRITE_EXTERNAL_STORAGE; a grant moves app-storage
+    // downloads out. Once READ is held (same permission group) the system grants WRITE without a dialog, so it's
+    // requested whenever that's the case — once per session, so a policy denial can't loop through ON_RESUME.
+    val writePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) DownloadManager.migrateToPublic()
+    }
+    var legacyWriteTried by remember { mutableStateOf(false) }
+    val ensureLegacyWrite: () -> Unit = {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !legacyWriteTried &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            legacyWriteTried = true
+            writePermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
 
     // Device music-library permission + one-shot scan for the Downloads "On this device" section.
     var hasAudio by remember { mutableStateOf(hasAudioPermission(context)) }
     val audioPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasAudio = granted
-        if (granted) localVm.scan(force = true)
+        if (granted) {
+            localVm.scan(force = true)
+            ensureLegacyWrite()
+        }
     }
     LaunchedEffect(Unit) { if (hasAudio) localVm.scan() }
 
@@ -133,10 +192,61 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
             if (event == Lifecycle.Event.ON_RESUME) {
                 val granted = hasAudioPermission(context)
                 if (granted != hasAudio) { hasAudio = granted; if (granted) localVm.scan(force = true) }
+                // Downloads are ordinary files now: drop ones deleted in the Files app, and (below Android 10) pick up
+                // a storage grant made in system Settings — or complete a READ grant to WRITE, which needs no dialog.
+                DownloadManager.refreshNetwork()
+                DownloadManager.reconcile()
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    ensureLegacyWrite()
+                    DownloadManager.migrateToPublic()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    // Below Android 10 with no storage permission at all: ask once ever (persisted, device-local) when the first
+    // download exists; until it's granted downloads stay in app storage.
+    LaunchedEffect(downloads.isNotEmpty()) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && downloads.isNotEmpty() &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED &&
+            !StoragePromptStore.asked(context)
+        ) {
+            StoragePromptStore.setAsked(context)
+            writePermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
+    // Settings → Download location: the system folder picker. The grant is persisted so downloads keep writing
+    // there after a restart. Earlier folders' grants are kept — songs already saved there must stay playable.
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+                .onSuccess {
+                    val label = folderLabel(uri)
+                    settingsVm.setDownloadFolder(uri.toString(), label)
+                    Toast.makeText(context, "New downloads will be saved to $label", Toast.LENGTH_SHORT).show()
+                }
+                .onFailure { Toast.makeText(context, "Couldn't use that folder — pick another", Toast.LENGTH_SHORT).show() }
+        }
+    }
+    val presetFolder = settings.downloadRelPath ?: PublicStore.DEFAULT_REL_PATH
+    val customFolderLabel = settings.downloadTreeUri?.let { settings.downloadFolderLabel ?: "Custom folder" }
+
+    // Published downloads are in shared storage, so the device scan finds them too — hide the ones the Downloads
+    // list already shows (same MediaStore row id; ones at a known path the scan itself skips). Keyed on the id
+    // SET, which only changes when a download lands or goes — progress ticks don't re-filter the library.
+    // Every download row id seen this session stays hidden: the scan is a snapshot, so a removed (or reconciled-away)
+    // download would otherwise come back under On this device as a dead row until the next Rescan.
+    val seenOwnRowIds = remember { HashSet<Long>() }
+    val ownRowIds = remember(downloads) {
+        downloads.mapNotNullTo(HashSet<Long>()) { d -> d.filePath?.let(::mediaRowId) }.also { seenOwnRowIds.addAll(it) }
+    }
+    val deviceTracks = remember(localTracks, ownRowIds) {
+        if (seenOwnRowIds.isEmpty()) localTracks else localTracks.filterNot { mediaRowId(it.url) in seenOwnRowIds }
     }
 
     var tab by remember { mutableStateOf(PulseTab.Home) }
@@ -211,13 +321,7 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
     val play = remember(playerVm) { { list: List<StreamItem>, i: Int -> playerVm.playList(list, i) } }
     val playLocal = remember(playerVm) {
         { dl: DownloadItem ->
-            dl.filePath?.let { fp ->
-                // Prefer the downloaded side-car cover as a file:// uri — Coil (mini-player/NowPlaying)
-                // and Media3's notification bitmap loader both read it, so art shows fully offline.
-                val art = dl.artPath?.let { java.io.File(it) }?.takeIf { it.exists() }
-                    ?.let { android.net.Uri.fromFile(it).toString() } ?: dl.thumbnailUrl
-                playerVm.playLocalFile(dl.title, dl.uploader, art, fp)
-            }
+            dl.toPlayable()?.let { playerVm.playLocalFile(it.title, it.uploader, it.thumbnailUrl, it.url) }
             Unit
         }
     }
@@ -387,15 +491,19 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                 )
                 PulseTab.Downloads -> DownloadsScreen(
                     items = downloads,
-                    localTracks = localTracks,
+                    localTracks = deviceTracks,
                     hasAudioPermission = hasAudio,
                     scanningLocal = localScanning,
                     onRequestPermission = { audioPermLauncher.launch(AUDIO_PERMISSION) },
                     onRescanLocal = { localVm.scan(force = true) },
-                    onPlayLocal = { i -> playerVm.playList(localTracks, i, "On this device") },
+                    onPlayLocal = { list, i -> playerVm.playList(list, i, "On this device") },
                     onPlay = playLocal, onRemove = removeDl,
                     onRetry = { DownloadManager.enqueue(context, it.url, it.title, it.uploader, it.thumbnailUrl, it.format) },
                     onBrowse = { tab = PulseTab.Home },
+                    onOpenSettings = { showSettings = true },
+                    waitingForWifi = settings.wifiOnly && !onWifi,
+                    // Downloaded + on-device songs as ONE shuffled queue.
+                    onShuffle = { dls, locals -> playerVm.shuffleAll(dls.mapNotNull { it.toPlayable() } + locals, "Downloads") },
                 )
                 }
             }
@@ -495,6 +603,19 @@ fun PulseRoot(homeVm: HomeViewModel, searchVm: SearchViewModel, playerVm: Player
                     onSetWifi = { settingsVm.setWifiOnly(it) },
                     onSetPreferVideo = { settingsVm.setPreferVideo(it) },
                     onSetMax = { settingsVm.setMaxConcurrent(it) },
+                    downloadLocation = customFolderLabel ?: presetFolder,
+                    locationPresets = PublicStore.PRESETS,
+                    selectedPreset = if (customFolderLabel == null) presetFolder else null,
+                    customFolder = customFolderLabel,
+                    onPickPreset = { settingsVm.setDownloadPreset(it) },
+                    onPickFolder = {
+                        // Some debloated / Go builds ship no system folder picker at all.
+                        try {
+                            folderPicker.launch(null)
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            Toast.makeText(context, "No folder picker on this phone — choose one of the folders above", Toast.LENGTH_LONG).show()
+                        }
+                    },
                 )
             }
         }

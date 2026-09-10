@@ -218,6 +218,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playOne(item: StreamItem) = playList(listOf(item), 0)
 
+    /** "Shuffle all": play [list] in shuffle mode, starting from a random track. */
+    fun shuffleAll(list: List<StreamItem>, source: String) {
+        if (list.isEmpty()) return
+        if (!shuffle) {
+            shuffle = true
+            _ui.update { it.copy(shuffle = true) }
+        }
+        playList(list, Random.nextInt(list.size), source)
+    }
+
     /** Play a locally-downloaded file directly (no extractor resolution). */
     fun playLocalFile(title: String, uploader: String, thumbnailUrl: String?, filePath: String) {
         val c = controller ?: run {
@@ -238,7 +248,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         startCycle()
         _ui.update { it.copy(items = items, index = 0, hasCurrent = true, loading = false, error = null) }
         val mi = MediaItem.Builder()
-            .setUri(Uri.fromFile(File(filePath)))
+            // Published downloads are MediaStore content:// uris; older/pre-Q ones are plain paths.
+            .setUri(if (filePath.startsWith("content://")) Uri.parse(filePath) else Uri.fromFile(File(filePath)))
             .setMediaMetadata(
                 MediaMetadata.Builder().setTitle(title).setArtist(uploader).setArtworkUri(thumbnailUrl?.let { Uri.parse(it) }).build()
             )
@@ -403,11 +414,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             pendingOnConnect = { resolveAndPlay(resumePositionMs, forceRefresh) }
             return
         }
-        // Offline sources play directly, never via the network extractor: downloaded files store a raw
-        // path in `url`; device-library tracks store a MediaStore content:// uri.
+        // Offline sources play directly, never via the network extractor: downloads and device-library
+        // tracks store a MediaStore content:// uri in `url` (pre-Q or not-yet-published downloads, a raw path).
+        // A download moved to shared storage while it sat in this queue plays from where it went.
+        val location = app.pulse.download.DownloadManager.currentLocation(item.url)
         val directUri: Uri? = when {
-            item.url.startsWith("content://") -> Uri.parse(item.url)
-            else -> runCatching { File(item.url) }.getOrNull()?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
+            location.startsWith("content://") -> Uri.parse(location)
+            else -> runCatching { File(location) }.getOrNull()?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
         }
         if (directUri != null) {
             val mi = MediaItem.Builder()

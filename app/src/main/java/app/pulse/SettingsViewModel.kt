@@ -19,4 +19,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setWifiOnly(v: Boolean) = viewModelScope.launch { SettingsStore.setWifiOnly(getApplication(), v) }
     fun setPreferVideo(v: Boolean) = viewModelScope.launch { SettingsStore.setPreferVideo(getApplication(), v) }
     fun setMaxConcurrent(v: Int) = viewModelScope.launch { SettingsStore.setMaxConcurrent(getApplication(), v) }
+    fun setDownloadFolder(treeUri: String?, label: String?) = viewModelScope.launch { SettingsStore.setDownloadFolder(getApplication(), treeUri, label) }
+    fun setDownloadPreset(relPath: String) = viewModelScope.launch { SettingsStore.setDownloadPreset(getApplication(), relPath) }
 }

@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The session cookie is encrypted with an Android-Keystore key that is NOT backed up, so a restored copy
      could never be decrypted (and would surface as a confusing silent-logout). Exclude the auth DataStore so a
-     new device starts cleanly signed-out and the user just logs in again. -->
+     new device starts cleanly signed-out and the user just logs in again.
+     Download records hold device-specific MediaStore row ids (a restore would point them at unrelated files),
+     and the private downloads dir only holds covers and in-progress files — the songs themselves live in shared
+     storage. Keep both out; restored songs still show up under "On this device". pulse_local holds device-only
+     flags (e.g. "storage permission already asked") that must not follow the user to a new device. -->
 <full-backup-content>
     <exclude domain="file" path="datastore/pulse_auth.preferences_pb" />
+    <exclude domain="file" path="datastore/pulse_local.preferences_pb" />
+    <exclude domain="file" path="downloads.json" />
+    <exclude domain="external" path="downloads/" />
 </full-backup-content>

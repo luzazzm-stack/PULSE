@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12+ (API 31) backup/transfer rules. The Keystore-encrypted session cookie can't be decrypted on a
-     different device, so keep it out of both cloud backup and device-to-device transfer. -->
+     different device, so keep it out of both cloud backup and device-to-device transfer. Download records hold
+     device-specific MediaStore row ids, the private downloads dir only covers/in-progress files, and pulse_local
+     device-only flags (see backup_rules.xml) — out of both too. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="datastore/pulse_auth.preferences_pb" />
+        <exclude domain="file" path="datastore/pulse_local.preferences_pb" />
+        <exclude domain="file" path="downloads.json" />
+        <exclude domain="external" path="downloads/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="datastore/pulse_auth.preferences_pb" />
+        <exclude domain="file" path="datastore/pulse_local.preferences_pb" />
+        <exclude domain="file" path="downloads.json" />
+        <exclude domain="external" path="downloads/" />
     </device-transfer>
 </data-extraction-rules>
