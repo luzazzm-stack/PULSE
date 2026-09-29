@@ -11,6 +11,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -29,6 +30,11 @@ const val CMD_PREV = "app.pulse.PREV"
 const val CMD_STOP = "app.pulse.STOP"
 
 class PlaybackService : MediaSessionService() {
+
+    companion object {
+        /** True while a PlayerViewModel (which owns the real queue and starts every next track) is alive. */
+        @Volatile var queueOwnerAlive = false
+    }
 
     private var session: MediaSession? = null
 
@@ -131,6 +137,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        setMediaNotificationProvider(HoldAwareProvider(DefaultMediaNotificationProvider(this)))
         val exo = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -164,6 +171,43 @@ class PlaybackService : MediaSessionService() {
     private fun dismissNotification() {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         NotificationManagerCompat.from(this).cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
+    }
+
+    /**
+     * True while playback is still WANTED but the player is between streams: a track just errored (IDLE)
+     * or ended (ENDED) and the ViewModel is resolving what plays next. Media3 1.2.1 drops the service out
+     * of the foreground in exactly that window, and on Android 12+ it may not get back in from the
+     * background ("Background started FGS: Disallowed" on the phone). Out of the foreground, the app was then
+     * killed within minutes ("excessive cpu" — decoding audio is too much for a plain background app) and the
+     * music stopped for good. Every give-up path in the ViewModel pauses first, which ends the hold.
+     */
+    private fun holdingForeground(): Boolean {
+        if (!queueOwnerAlive) return false   // nobody left to start the next track — let it go
+        val p = session?.player ?: return false
+        return p.playWhenReady && p.mediaItemCount > 0 &&
+            (p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED)
+    }
+
+    // Media3 1.2.1 can leave the foreground from exactly two places: this per-event update, and the provider's
+    // delayed callback (artwork finished loading) below. While holding, both keep the current notification and
+    // foreground state untouched; the next READY/BUFFERING event refreshes the notification normally.
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        if (holdingForeground()) return
+        super.onUpdateNotification(session, startInForegroundRequired)
+    }
+
+    private inner class HoldAwareProvider(private val inner: MediaNotification.Provider) : MediaNotification.Provider {
+        override fun createNotification(
+            mediaSession: MediaSession,
+            customLayout: ImmutableList<CommandButton>,
+            actionFactory: MediaNotification.ActionFactory,
+            onNotificationChangedCallback: MediaNotification.Provider.Callback,
+        ): MediaNotification = inner.createNotification(mediaSession, customLayout, actionFactory) { n ->
+            if (!holdingForeground()) onNotificationChangedCallback.onNotificationChanged(n)
+        }
+
+        override fun handleCustomCommand(session: MediaSession, action: String, extras: Bundle): Boolean =
+            inner.handleCustomCommand(session, action, extras)
     }
 
     // Media3 1.2.1's MediaSessionService does NOT override onTaskRemoved (verified against the 1.2.1

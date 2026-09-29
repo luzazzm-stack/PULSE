@@ -151,6 +151,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                 // Several tracks in a row died: that's a dead network / dead session, not one bad track.
                 resolveJob?.cancel()
+                controller?.pause()   // giving up: releases PlaybackService's between-tracks foreground hold
                 _ui.update { it.copy(loading = false, error = "Playback stopped — check your connection") }
                 return
             }
@@ -220,6 +221,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        PlaybackService.queueOwnerAlive = true
         connectController()
         viewModelScope.launch {
             while (true) {
@@ -336,7 +338,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 if (!auto) controller?.pause()
                 playAt(0)
             }
-            else -> return   // end of order, no repeat: stop (manual next is a no-op, not a restart)
+            // End of order, no repeat: stop (manual next is a no-op, not a restart). When the queue ran out on
+            // its own, pause so PlaybackService's foreground hold lets go; togglePlay's ENDED branch still restarts.
+            else -> { if (auto) controller?.pause(); return }
         }
     }
 
@@ -469,6 +473,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 Log.e("PULSE", "streamInfo failed for ${item.url}", e)
                 consecutiveFailures++
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                    controller?.pause()   // giving up: releases the service's foreground hold
                     _ui.update { it.copy(loading = false, error = "Playback stopped — check your connection") }
                 } else {
                     // Bad track (or a deleted local file whose retry fell through here): surface it and
@@ -497,7 +502,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             Log.e("PULSE", "No playable stream for ${item.url}")
             consecutiveFailures++
             _ui.update { it.copy(loading = false, error = "No playable stream for this track") }
-            if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) advance(auto = true)
+            if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) advance(auto = true) else controller?.pause()
             return
         }
         val c = controller
@@ -585,8 +590,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val token = "q$seq"
         queueJob = viewModelScope.launch {
             val uri: Uri = localUri(item) ?: run {
-                val data = withContext(Dispatchers.IO) { runCatching { StreamResolver.resolve(item.url) }.getOrNull() } ?: return@launch
-                val url = (if (videoMode) (data.videoUrl ?: data.audioUrl) else data.audioUrl) ?: return@launch
+                val video = videoMode
+                val url = withContext(Dispatchers.IO) {
+                    fun pick() = runCatching { StreamResolver.resolve(item.url) }.getOrNull()
+                        ?.let { if (video) (it.videoUrl ?: it.audioUrl) else it.audioUrl }
+                    val first = pick() ?: return@withContext null
+                    if (StreamResolver.isServed(first)) return@withContext first
+                    // Refused (403): fetch a fresh URL once now, instead of a silent gap + error-retry at the switch.
+                    Log.i("PULSE", "queued url refused, re-resolving ${item.title}")
+                    StreamResolver.evict(item.url)
+                    pick() ?: first
+                } ?: return@launch
                 Uri.parse(url)
             }
             val cc = controller ?: return@launch
@@ -652,6 +666,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         released = true
+        PlaybackService.queueOwnerAlive = false
         controller?.removeListener(listener)
         controller = null
         future?.let { MediaController.releaseFuture(it) }

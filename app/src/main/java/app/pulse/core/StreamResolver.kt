@@ -59,6 +59,13 @@ object StreamResolver {
         return data
     }
 
+    /** True when googlevideo actually serves [streamUrl]: a 2-byte ranged GET. The iOS-client URLs are
+     *  intermittently refused with 403 (about half of the queued tracks on the test phone), which used to
+     *  surface only as a few seconds of silence when the player reached them. */
+    fun isServed(streamUrl: String): Boolean = runCatching {
+        http.newCall(Request.Builder().url(streamUrl).header("Range", "bytes=0-1").build()).execute().use { it.isSuccessful }
+    }.getOrDefault(true)   // network hiccup: don't churn the resolver, let the player's own retry handle it
+
     /** Drop a cached entry — used after a player error, when the cached URL is exactly what died. */
     fun evict(url: String) {
         synchronized(cache) { cache.remove(url) }
