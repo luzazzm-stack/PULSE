@@ -241,8 +241,9 @@ object YtMusic {
         return null
     }
 
-    /** The user's YouTube "Liked Music" playlist — needs a connected account. */
-    const val LIKED_BROWSE_ID = "FEmusic_liked_videos"
+    /** The user's YouTube "Liked Music" playlist — needs a connected account. VLLM is the playlist itself (the
+     *  same id Home's "Liked Music" card opens); the FEmusic_liked_videos feed stops paging early (252 of 677). */
+    const val LIKED_BROWSE_ID = "VLLM"
 
     /** Like / un-like a track on the user's YouTube account. Call off the main thread.
      *  Returns true only when YouTube accepted the rating: post() already guarantees a 2xx parseable
@@ -326,7 +327,12 @@ object YtMusic {
         val seen = HashSet<String>()
         var pages = 1
         while (continuation != null && seen.add(continuation.token) && pages < MAX_BROWSE_PAGES) {
-            val page = fetchContinuation(continuation, auth) ?: break
+            // One failed page used to end the list right there (Liked Music then stopped at 100): retry it twice.
+            val c = continuation
+            val page = fetchContinuation(c, auth)
+                ?: run { Thread.sleep(750); fetchContinuation(c, auth) }
+                ?: run { Thread.sleep(1500); fetchContinuation(c, auth) }
+                ?: break
             pages++
             val before = tracks.size
             collectTracks(page, tracks)

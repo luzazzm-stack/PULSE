@@ -84,6 +84,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // advancing usually swaps straight to a ready URL instead of idling on the network — that idle gap
     // (player IDLE, radio quiet, screen off) is exactly where Doze liked to kill playback after a few songs.
     private var prefetchJob: Job? = null
+    // The upcoming track, already handed to the player as a SECOND media item so ExoPlayer rolls straight
+    // into it. Without this every song ended in STATE_ENDED, Media3 dropped the service out of the
+    // foreground, and the next track then had to restart foreground from the background while the network
+    // resolve ran — with the screen off the system refused or froze the app, and playback died after a
+    // few songs. [pos] is the track's position in `order` (or in [wrapOrder] when it opens a repeat-all cycle).
+    private class Queued(val token: String, val pos: Int, val wrapOrder: List<Int>?)
+    private var queued: Queued? = null
+    private var queueJob: Job? = null
+    private var queueSeq = 0
 
     private val _ui = MutableStateFlow(PlayerUi())
     val ui = _ui.asStateFlow()
@@ -98,6 +107,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     consecutiveFailures = 0
                     retriedCurrentAfterError = false
                     prefetchNext()
+                    queueNext()
                 }
                 Player.STATE_ENDED -> {
                     if (suppressAutoAdvance) { suppressAutoAdvance = false; return }  // queue was just cleared (Close), don't advance
@@ -106,6 +116,26 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     if (repeat == 2) { controller?.seekTo(0); controller?.play() } else advance(auto = true)
                 }
             }
+        }
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // The player moved onto the queued next track by itself (AUTO) or via advance()'s seek (SEEK):
+            // adopt it as the current track. REPEAT (repeat-one looping) and PLAYLIST_CHANGED (our own
+            // setMediaItem) are not moves to the queued track.
+            val q = queued ?: return
+            if (mediaItem?.mediaId != q.token) return
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) return
+            queued = null
+            q.wrapOrder?.let { order = it }
+            orderPos = q.pos.coerceIn(0, order.lastIndex)
+            index = order[orderPos]
+            retriedCurrentAfterError = false
+            Log.i("PULSE", "gapless -> orderPos=$orderPos/${order.lastIndex}")
+            // Drop the finished track so the player holds just [current] again, ready for the next queueNext().
+            controller?.let { c -> if (c.currentMediaItemIndex > 0) c.removeMediaItems(0, c.currentMediaItemIndex) }
+            _ui.update { it.copy(index = index, loading = false, error = null) }
+            // A gapless move never passes through STATE_READY again, so line up the following track here.
+            prefetchNext()
+            queueNext()
         }
         override fun onPlayerError(error: PlaybackException) {
             Log.e("PULSE", "player error for ${items.getOrNull(index)?.url}", error)
@@ -177,7 +207,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             // `future === f` guards against a stale connect landing after a disconnect already
             // swapped in a newer attempt (the stale controller would be a dead one).
             if (!released && future === f) {
-                controller = f.get().also { it.addListener(listener) }
+                controller = f.get().also {
+                    it.addListener(listener)
+                    it.repeatMode = if (repeat == 2) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF   // a restarted service starts at OFF
+                }
                 pushState()
                 // Replay a play request that raced the connection (first tap after a cold launch,
                 // or one that arrived while we were rebuilding after a service death).
@@ -242,7 +275,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             order + newIdx   // sequential order stays the identity
         }
         invalidatePrefetch()   // the upcoming-next may just have changed
+        dropQueued()
         prefetchNext()
+        queueNext()
         _ui.update { it.copy(items = items) }
     }
 
@@ -276,6 +311,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun advance(auto: Boolean) {
         Log.i("PULSE", "advance(auto=$auto): orderPos=$orderPos/${order.lastIndex} items=${items.size} shuffle=$shuffle repeat=$repeat")
         if (items.isEmpty()) return
+        // The next track is already loaded in the player: jump onto it (instant, no network). seekTo(index, pos)
+        // is used because the service's QueuePlayer turns seekToNext* into another ADVANCE broadcast.
+        val c = controller
+        if (queued != null && c != null && c.mediaItemCount > 1 && c.playbackState != Player.STATE_IDLE) {
+            c.seekTo(c.currentMediaItemIndex + 1, 0L)
+            c.play()
+            return
+        }
         // On a USER skip, silence the outgoing track the instant of the tap: letting it keep playing
         // under the loading state made every skip feel broken ("I pressed next and the old song kept
         // going"). Auto-advance doesn't need this — the track already ended. Only pause on the branches
@@ -323,11 +366,22 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         invalidatePrefetch()   // the upcoming-next likely changed
+        dropQueued()
         prefetchNext()
+        queueNext()
         _ui.update { it.copy(shuffle = shuffle) }
     }
 
-    fun cycleRepeat() { repeat = (repeat + 1) % 3; _ui.update { it.copy(repeat = repeat) } }
+    fun cycleRepeat() {
+        repeat = (repeat + 1) % 3
+        // Repeat-one loops inside the player itself, so a finished track never passes through STATE_ENDED
+        // (the gap that knocked playback out of the foreground). The queued next track has to go: with
+        // repeat-one it isn't next, and leaving repeat-one (or entering repeat-all) changes what is.
+        controller?.repeatMode = if (repeat == 2) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        dropQueued()
+        queueNext()
+        _ui.update { it.copy(repeat = repeat) }
+    }
 
     fun togglePlay() {
         val c = controller ?: return
@@ -354,11 +408,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         suppressAutoAdvance = true   // set BEFORE clearing so the STATE_ENDED from clearMediaItems() doesn't auto-advance
         resolveJob?.cancel()
         invalidatePrefetch()
+        dropQueued()
         pendingOnConnect = null
         consecutiveFailures = 0
         retriedCurrentAfterError = false
         items = emptyList(); index = 0; order = emptyList(); orderPos = 0; videoMode = false; shuffle = false; repeat = 0
-        controller?.let { it.stop(); it.clearMediaItems() }   // stops playback + removes the media notification
+        controller?.let { it.repeatMode = Player.REPEAT_MODE_OFF; it.stop(); it.clearMediaItems() }   // stops playback + removes the media notification
         _ui.value = PlayerUi()
     }
 
@@ -376,6 +431,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun resolveAndPlay(resumePositionMs: Long = 0L, forceRefresh: Boolean = false) {
         val item = items.getOrNull(index) ?: return
         resolveJob?.cancel()
+        dropQueued()   // setMediaItem below replaces the whole playlist; a queued next would be stale anyway
         val c = controller
         if (c == null) {
             // Controller still connecting (cold start): park the whole request — the old silent `return`
@@ -387,19 +443,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // Offline sources play directly, never via the network extractor: downloads and device-library
         // tracks store a MediaStore content:// uri in `url` (pre-Q or not-yet-published downloads, a raw path).
         // A download moved to shared storage while it sat in this queue plays from where it went.
-        val location = app.pulse.download.DownloadManager.currentLocation(item.url)
-        val directUri: Uri? = when {
-            location.startsWith("content://") -> Uri.parse(location)
-            else -> runCatching { File(location) }.getOrNull()?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
-        }
+        val directUri = localUri(item)
         if (directUri != null) {
-            val mi = MediaItem.Builder()
-                .setUri(directUri)
-                .setMediaMetadata(
-                    MediaMetadata.Builder().setTitle(item.title).setArtist(item.uploader).setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) }).build()
-                )
-                .build()
-            c.setMediaItem(mi); c.prepare()
+            c.setMediaItem(mediaItemFor(item, directUri)); c.prepare()
             if (resumePositionMs > 0L) c.seekTo(resumePositionMs)
             c.play()
             _ui.update { it.copy(loading = false, error = null) }
@@ -461,17 +507,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             pendingOnConnect = { startResolved(item, data, resumePositionMs) }
             return
         }
-        val mi = MediaItem.Builder()
-            .setUri(streamUrl)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(item.title)
-                    .setArtist(item.uploader)
-                    .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
-                    .build()
-            )
-            .build()
-        c.setMediaItem(mi)
+        c.setMediaItem(mediaItemFor(item, Uri.parse(streamUrl)))
         c.prepare()
         if (resumePositionMs > 0L) c.seekTo(resumePositionMs)
         // Explicit start regardless of the paused/ended/idle state the skip was requested in: a
@@ -517,6 +553,85 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun invalidatePrefetch() {
         prefetchJob?.cancel(); prefetchJob = null
     }
+
+    /**
+     * Hand the upcoming track to the player as a second media item (see [queued]). Uses the same
+     * resolver cache prefetchNext() warms, so this is usually instant. Best-effort: when it can't
+     * (resolve failed, repeat-one, end of the queue), the old ENDED -> advance() path still works.
+     */
+    private fun queueNext() {
+        val c = controller ?: return
+        if (queued != null || queueJob?.isActive == true) return
+        if (resolveJob?.isActive == true || repeat == 2 || items.isEmpty() || order.isEmpty()) return
+        if (c.mediaItemCount != 1 || c.playbackState == Player.STATE_IDLE || c.playbackState == Player.STATE_ENDED) return
+        val pos: Int
+        var wrap: List<Int>? = null
+        when {
+            orderPos < order.lastIndex -> pos = orderPos + 1
+            repeat == 1 -> {
+                // Opening the next repeat-all cycle: build its order now (same rule as advance()) so the
+                // first track of the new cycle can be queued too.
+                wrap = if (shuffle && items.size > 1) {
+                    items.indices.shuffled().toMutableList().apply { if (first() == index) add(removeAt(0)) }
+                } else items.indices.toList()
+                pos = 0
+            }
+            else -> return
+        }
+        val item = items.getOrNull((wrap ?: order)[pos]) ?: return
+        val seq = ++queueSeq
+        val curIndex = index
+        val curPos = orderPos
+        val token = "q$seq"
+        queueJob = viewModelScope.launch {
+            val uri: Uri = localUri(item) ?: run {
+                val data = withContext(Dispatchers.IO) { runCatching { StreamResolver.resolve(item.url) }.getOrNull() } ?: return@launch
+                val url = (if (videoMode) (data.videoUrl ?: data.audioUrl) else data.audioUrl) ?: return@launch
+                Uri.parse(url)
+            }
+            val cc = controller ?: return@launch
+            // Anything that moved (skip, new queue, shuffle, close) since this started makes the pick stale.
+            if (seq != queueSeq || index != curIndex || orderPos != curPos || cc.mediaItemCount != 1) return@launch
+            if (cc.playbackState == Player.STATE_IDLE || cc.playbackState == Player.STATE_ENDED) return@launch
+            cc.addMediaItem(mediaItemFor(item, uri, token))
+            queued = Queued(token, pos, wrap)
+            Log.i("PULSE", "queued next: pos=$pos ${item.title}")
+        }
+    }
+
+    /** Take the queued next track back out of the player (the order or repeat mode changed under it). */
+    private fun dropQueued() {
+        queueSeq++
+        queueJob?.cancel(); queueJob = null
+        if (queued == null) return
+        queued = null
+        controller?.let { c ->
+            val from = c.currentMediaItemIndex + 1
+            if (c.mediaItemCount > from) c.removeMediaItems(from, c.mediaItemCount)
+        }
+    }
+
+    /** Downloads and on-device tracks play straight from storage; null for anything that needs resolving. */
+    private fun localUri(item: StreamItem): Uri? {
+        val location = app.pulse.download.DownloadManager.currentLocation(item.url)
+        return when {
+            location.startsWith("content://") -> Uri.parse(location)
+            else -> runCatching { File(location) }.getOrNull()?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
+        }
+    }
+
+    private fun mediaItemFor(item: StreamItem, uri: Uri, mediaId: String = ""): MediaItem =
+        MediaItem.Builder()
+            .setUri(uri)
+            .setMediaId(mediaId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(item.title)
+                    .setArtist(item.uploader)
+                    .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                    .build()
+            )
+            .build()
 
     private fun pushState() {
         val c = controller ?: return
